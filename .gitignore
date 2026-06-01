@@ -1,0 +1,13 @@
+.source/
+.superpowers/
+node_modules/
+dist/
+dist-ssr/
+src-tauri/target/
+src-tauri/gen/
+*.log
+*.local
+.env
+.env.*
+!/.env.example
+coverage/
