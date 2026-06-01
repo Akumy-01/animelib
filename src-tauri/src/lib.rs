@@ -1,8 +1,14 @@
+pub mod commands;
 pub mod models;
 pub mod repository;
+pub mod tmdb;
 
+use tauri::Manager;
+
+pub use commands::*;
 pub use models::*;
 pub use repository::*;
+pub use tmdb::*;
 
 #[cfg(test)]
 mod tests {
@@ -52,10 +58,35 @@ mod tests {
         assert_eq!(entries[0].name, "Test Series");
         assert_eq!(entries[0].watch_status, WatchStatus::PlanToWatch);
     }
+
+    #[test]
+    fn tmdb_search_url_encodes_query_and_language() {
+        let url = build_search_url("tv", "Frieren Beyond Journey", "zh-CN", 1);
+        assert!(url.contains("Frieren%20Beyond%20Journey"));
+        assert!(url.contains("language=zh-CN"));
+        assert!(url.contains("page=1"));
+    }
 }
 
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let state = AppRuntimeState::initialize(app.handle())
+                .map_err(|error| Box::<dyn std::error::Error>::from(error))?;
+            app.manage(state);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_app_state,
+            save_api_key,
+            search_tmdb,
+            add_entry,
+            update_entry,
+            delete_entry,
+            export_library,
+            create_backup,
+            restore_backup
+        ])
         .run(tauri::generate_context!())
         .expect("error while running AniShelf");
 }
