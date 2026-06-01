@@ -21,14 +21,19 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addEntry,
   deleteEntry,
+  detailForEntry,
+  episodeProgressForEntry,
   exportLibrary,
   getAppState,
+  refreshEntryDetail,
   restoreBackup,
   saveApiKey,
   searchTmdb,
+  setEpisodeWatched,
   updateEntry,
 } from "./api";
 import {
+  combineEpisodesWithProgress,
   deriveLibraryStats,
   filterEntries,
   mediaTypeLabel,
@@ -38,7 +43,16 @@ import {
   updateEntryInList,
   watchStatusLabel,
 } from "./library";
-import type { AnimeEntry, BasicInfo, LibraryFilters, LibrarySort, LibraryViewStyle, WatchStatus } from "./types";
+import type {
+  AnimeDetail,
+  AnimeEntry,
+  BasicInfo,
+  EpisodeProgress,
+  LibraryFilters,
+  LibrarySort,
+  LibraryViewStyle,
+  WatchStatus,
+} from "./types";
 
 type Sheet = "search" | "settings" | "profile" | "export" | null;
 
@@ -55,6 +69,8 @@ export function App() {
   const [sortReversed, setSortReversed] = useState(false);
   const [filters, setFilters] = useState<LibraryFilters>({ status: "all" });
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [details, setDetails] = useState<Record<string, AnimeDetail | null>>({});
+  const [episodeProgress, setEpisodeProgress] = useState<Record<string, EpisodeProgress[]>>({});
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -87,6 +103,33 @@ export function App() {
     const saved = await updateEntry(entry);
     setEntries((current) => updateEntryInList(current, saved));
     setSelectedId(saved.id);
+  }
+
+  useEffect(() => {
+    if (!selectedEntry) {
+      return;
+    }
+    detailForEntry(selectedEntry.id)
+      .then((detail) => setDetails((current) => ({ ...current, [selectedEntry.id]: detail })))
+      .catch((error) => setToast(String(error)));
+    episodeProgressForEntry(selectedEntry.id)
+      .then((progress) => setEpisodeProgress((current) => ({ ...current, [selectedEntry.id]: progress })))
+      .catch((error) => setToast(String(error)));
+  }, [selectedEntry?.id]);
+
+  async function refreshDetail(entry: AnimeEntry) {
+    try {
+      const detail = await refreshEntryDetail(entry, "zh-CN");
+      setDetails((current) => ({ ...current, [entry.id]: detail }));
+      setToast("Detail refreshed");
+    } catch (error) {
+      setToast(String(error));
+    }
+  }
+
+  async function toggleEpisode(entry: AnimeEntry, episodeNumber: number, watched: boolean) {
+    const progress = await setEpisodeWatched(entry.id, episodeNumber, watched);
+    setEpisodeProgress((current) => ({ ...current, [entry.id]: progress }));
   }
 
   async function removeEntry(entry: AnimeEntry) {
@@ -136,7 +179,15 @@ export function App() {
             )}
           </section>
 
-          <DetailPanel entry={selectedEntry} onChange={persistEntry} onDelete={removeEntry} />
+          <DetailPanel
+            entry={selectedEntry}
+            detail={selectedEntry ? details[selectedEntry.id] ?? null : null}
+            progress={selectedEntry ? episodeProgress[selectedEntry.id] ?? [] : []}
+            onChange={persistEntry}
+            onDelete={removeEntry}
+            onRefreshDetail={refreshDetail}
+            onToggleEpisode={toggleEpisode}
+          />
         </section>
 
         <footer className="bottom-bar">
@@ -272,12 +323,20 @@ function Poster({ entry }: { entry: AnimeEntry }) {
 
 function DetailPanel({
   entry,
+  detail,
+  progress,
   onChange,
   onDelete,
+  onRefreshDetail,
+  onToggleEpisode,
 }: {
   entry: AnimeEntry | null;
+  detail: AnimeDetail | null;
+  progress: EpisodeProgress[];
   onChange: (entry: AnimeEntry) => Promise<void>;
   onDelete: (entry: AnimeEntry) => Promise<void>;
+  onRefreshDetail: (entry: AnimeEntry) => Promise<void>;
+  onToggleEpisode: (entry: AnimeEntry, episodeNumber: number, watched: boolean) => Promise<void>;
 }) {
   const [draftNotes, setDraftNotes] = useState(entry?.notes ?? "");
 
@@ -293,6 +352,8 @@ function DetailPanel({
       </aside>
     );
   }
+
+  const episodes = detail ? combineEpisodesWithProgress(detail.episodes, progress) : [];
 
   return (
     <aside className="detail-panel">
@@ -344,8 +405,58 @@ function DetailPanel({
 
       <section className="detail-section">
         <h3>Overview</h3>
-        <p>{entry.overview || "No overview available."}</p>
+        <p>{detail?.overview || entry.overview || "No overview available."}</p>
       </section>
+
+      <section className="detail-section meta-section">
+        <div>
+          <h3>TMDb Detail</h3>
+          <p>
+            {detail
+              ? `${detail.status ?? "Unknown status"} · ${detail.voteAverage?.toFixed(1) ?? "No rating"} · ${
+                  detail.episodeCount ?? 0
+                } episodes`
+              : "No detail cached yet."}
+          </p>
+        </div>
+        <button className="secondary-button" onClick={() => onRefreshDetail(entry)}>
+          Refresh Detail
+        </button>
+      </section>
+
+      {detail?.seasons.length ? (
+        <section className="detail-section">
+          <h3>Seasons</h3>
+          <div className="season-list">
+            {detail.seasons.map((season) => (
+              <div key={season.id} className="season-row">
+                <Calendar size={17} />
+                <span>{season.title}</span>
+                <strong>{season.episodeCount ?? 0} eps</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {episodes.length ? (
+        <section className="detail-section">
+          <h3>Episodes</h3>
+          <div className="episode-list">
+            {episodes.map((episode) => (
+              <button
+                key={episode.id}
+                className={`episode-row ${episode.watched ? "watched" : ""}`}
+                onClick={() => onToggleEpisode(entry, episode.episodeNumber, !episode.watched)}
+              >
+                <span>{episode.episodeNumber}</span>
+                <strong>{episode.title}</strong>
+                <CheckCircle2 size={17} />
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="detail-section">
         <h3>Notes</h3>

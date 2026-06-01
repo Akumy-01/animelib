@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { parseBackupState } from "./library";
-import type { AnimeEntry, AppState, BasicInfo } from "./types";
+import type { AnimeDetail, AnimeEntry, AppState, BasicInfo, EpisodeProgress } from "./types";
 
 const mockStateKey = "anishelf.windows.mockState";
 
@@ -133,6 +133,51 @@ export async function updateEntry(entry: AnimeEntry): Promise<AnimeEntry> {
   return entry;
 }
 
+export async function detailForEntry(entryId: string): Promise<AnimeDetail | null> {
+  if (isTauriRuntime()) {
+    return invoke<AnimeDetail | null>("detail_for_entry", { entryId });
+  }
+  return loadMockDetail(entryId);
+}
+
+export async function refreshEntryDetail(entry: AnimeEntry, language: string): Promise<AnimeDetail> {
+  if (isTauriRuntime()) {
+    return invoke<AnimeDetail>("refresh_entry_detail", { entry, language });
+  }
+  const detail = makeMockDetail(entry, language);
+  saveMockDetail(detail);
+  return detail;
+}
+
+export async function episodeProgressForEntry(entryId: string): Promise<EpisodeProgress[]> {
+  if (isTauriRuntime()) {
+    return invoke<EpisodeProgress[]>("episode_progress_for_entry", { entryId });
+  }
+  return loadMockProgress(entryId);
+}
+
+export async function setEpisodeWatched(
+  entryId: string,
+  episodeNumber: number,
+  watched: boolean,
+): Promise<EpisodeProgress[]> {
+  if (isTauriRuntime()) {
+    return invoke<EpisodeProgress[]>("set_episode_watched", { entryId, episodeNumber, watched });
+  }
+  const current = loadMockProgress(entryId).filter((item) => item.episodeNumber !== episodeNumber);
+  const next = [
+    ...current,
+    {
+      entryId,
+      episodeNumber,
+      watched,
+      watchedAt: watched ? new Date().toISOString() : null,
+    },
+  ].sort((left, right) => left.episodeNumber - right.episodeNumber);
+  localStorage.setItem(progressKey(entryId), JSON.stringify(next));
+  return next;
+}
+
 export async function deleteEntry(id: string): Promise<AppState> {
   if (isTauriRuntime()) {
     return invoke<AppState>("delete_entry", { id });
@@ -178,6 +223,57 @@ function loadMockState(): AppState {
 
 function saveMockState(state: AppState): void {
   localStorage.setItem(mockStateKey, JSON.stringify(state));
+}
+
+function detailKey(entryId: string): string {
+  return `anishelf.windows.detail.${entryId}`;
+}
+
+function progressKey(entryId: string): string {
+  return `anishelf.windows.progress.${entryId}`;
+}
+
+function loadMockDetail(entryId: string): AnimeDetail | null {
+  const raw = localStorage.getItem(detailKey(entryId));
+  return raw ? (JSON.parse(raw) as AnimeDetail) : null;
+}
+
+function saveMockDetail(detail: AnimeDetail): void {
+  localStorage.setItem(detailKey(detail.entryId), JSON.stringify(detail));
+}
+
+function loadMockProgress(entryId: string): EpisodeProgress[] {
+  const raw = localStorage.getItem(progressKey(entryId));
+  return raw ? (JSON.parse(raw) as EpisodeProgress[]) : [];
+}
+
+function makeMockDetail(entry: AnimeEntry, language: string): AnimeDetail {
+  const episodeCount = entry.mediaType === "movie" ? 1 : 12;
+  return {
+    entryId: entry.id,
+    language,
+    title: entry.name,
+    subtitle: entry.mediaType === "series" ? "Series detail" : null,
+    overview: entry.overview,
+    status: entry.watchStatus === "watched" ? "Ended" : "Returning Series",
+    airDate: entry.onAirDate,
+    voteAverage: entry.score ? entry.score * 2 : 8.4,
+    runtimeMinutes: entry.mediaType === "movie" ? 124 : 24,
+    episodeCount,
+    seasonCount: entry.mediaType === "series" ? 1 : null,
+    seasons:
+      entry.mediaType === "series"
+        ? [{ id: entry.tmdbId * 10 + 1, seasonNumber: 1, title: "Season 1", episodeCount }]
+        : [],
+    episodes: Array.from({ length: episodeCount }, (_, index) => ({
+      id: entry.tmdbId * 100 + index + 1,
+      episodeNumber: index + 1,
+      title: entry.mediaType === "movie" ? entry.name : `Episode ${index + 1}`,
+      airDate: entry.onAirDate ?? null,
+      imageUrl: null,
+      overview: index === 0 ? entry.overview : null,
+    })),
+  };
 }
 
 function entryFromBasicInfo(info: BasicInfo): AnimeEntry {

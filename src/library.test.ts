@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   chunkBatchPrompts,
+  combineEpisodesWithProgress,
   deriveLibraryStats,
   filterEntries,
   parseBatchPrompts,
@@ -96,5 +97,20 @@ describe("parseBackupState", () => {
 
     expect(state.entries[0].name).toBe("Restored");
     expect(state.preferences.libraryViewStyle).toBe("list");
+  });
+});
+
+describe("combineEpisodesWithProgress", () => {
+  it("marks episodes as watched using progress records", () => {
+    const episodes = [
+      { id: 1, episodeNumber: 1, title: "One" },
+      { id: 2, episodeNumber: 2, title: "Two" },
+    ] as any;
+    const progress = [{ entryId: "series-1", episodeNumber: 2, watched: true }] as any;
+
+    expect(combineEpisodesWithProgress(episodes, progress)).toEqual([
+      { id: 1, episodeNumber: 1, title: "One", watched: false },
+      { id: 2, episodeNumber: 2, title: "Two", watched: true },
+    ]);
   });
 });

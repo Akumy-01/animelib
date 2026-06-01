@@ -1,5 +1,8 @@
 import type {
   AnimeEntry,
+  EpisodeProgress,
+  EpisodeSummary,
+  EpisodeWithProgress,
   AppPreferences,
   AppState,
   LibraryFilters,
@@ -124,6 +127,19 @@ export function parseBackupState(json: string): AppState {
     preferences: payload.preferences,
     hasApiKey: false,
   };
+}
+
+export function combineEpisodesWithProgress(
+  episodes: EpisodeSummary[],
+  progress: EpisodeProgress[],
+): EpisodeWithProgress[] {
+  const watchedEpisodes = new Set(
+    progress.filter((item) => item.watched).map((item) => item.episodeNumber),
+  );
+  return episodes.map((episode) => ({
+    ...episode,
+    watched: watchedEpisodes.has(episode.episodeNumber),
+  }));
 }
 
 function countStatus(entries: AnimeEntry[], status: WatchStatus): number {

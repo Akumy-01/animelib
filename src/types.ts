@@ -72,3 +72,45 @@ export interface LibraryStats {
   favorites: number;
   averageScore: number | null;
 }
+
+export interface AnimeDetail {
+  entryId: string;
+  language: string;
+  title: string;
+  subtitle?: string | null;
+  overview?: string | null;
+  status?: string | null;
+  airDate?: string | null;
+  voteAverage?: number | null;
+  runtimeMinutes?: number | null;
+  episodeCount?: number | null;
+  seasonCount?: number | null;
+  seasons: SeasonSummary[];
+  episodes: EpisodeSummary[];
+}
+
+export interface SeasonSummary {
+  id: number;
+  seasonNumber: number;
+  title: string;
+  posterUrl?: string | null;
+  episodeCount?: number | null;
+}
+
+export interface EpisodeSummary {
+  id: number;
+  episodeNumber: number;
+  title: string;
+  airDate?: string | null;
+  imageUrl?: string | null;
+  overview?: string | null;
+}
+
+export interface EpisodeProgress {
+  entryId: string;
+  episodeNumber: number;
+  watched: boolean;
+  watchedAt?: string | null;
+}
+
+export type EpisodeWithProgress = EpisodeSummary & { watched: boolean };
