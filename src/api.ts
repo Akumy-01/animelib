@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { parseBackupState } from "./library";
-import type { AnimeDetail, AnimeEntry, AppState, BasicInfo, EpisodeProgress } from "./types";
+import type { AnimeDetail, AnimeEntry, AppPreferences, AppState, BasicInfo, EpisodeProgress } from "./types";
 
 const mockStateKey = "anishelf.windows.mockState";
 
@@ -96,6 +96,15 @@ export async function saveApiKey(apiKey: string): Promise<AppState> {
     return invoke<AppState>("save_api_key", { apiKey });
   }
   const state = { ...loadMockState(), hasApiKey: apiKey.trim().length > 0 };
+  saveMockState(state);
+  return state;
+}
+
+export async function savePreferences(preferences: AppPreferences): Promise<AppState> {
+  if (isTauriRuntime()) {
+    return invoke<AppState>("save_preferences", { preferences });
+  }
+  const state = { ...loadMockState(), preferences };
   saveMockState(state);
   return state;
 }

@@ -412,6 +412,26 @@ textarea {
   box-shadow: 0 5px 12px rgba(42, 47, 52, 0.12);
 }
 
+.filter-search {
+  min-width: 190px;
+  max-width: 260px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(37, 48, 58, 0.12);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #68717a;
+}
+
+.filter-search input {
+  min-height: 36px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .sheet-backdrop {
   position: fixed;
   inset: 0;

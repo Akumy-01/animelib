@@ -1,9 +1,9 @@
 import type {
   AnimeEntry,
+  AppPreferences,
   EpisodeProgress,
   EpisodeSummary,
   EpisodeWithProgress,
-  AppPreferences,
   AppState,
   LibraryFilters,
   LibrarySort,
@@ -48,8 +48,20 @@ export function filterEntries(entries: AnimeEntry[], filters: LibraryFilters): A
   });
 }
 
+export function updateQueryFilter(filters: LibraryFilters, query: string): LibraryFilters {
+  const trimmed = query.trim();
+  return {
+    ...filters,
+    query: trimmed.length > 0 ? trimmed : undefined,
+  };
+}
+
 export function updateEntryInList(entries: AnimeEntry[], updated: AnimeEntry): AnimeEntry[] {
   return entries.map((entry) => (entry.id === updated.id ? updated : entry));
+}
+
+export function shouldRenderRemoteImage(url: string | null | undefined, failed: boolean): boolean {
+  return !failed && Boolean(url?.trim());
 }
 
 export function deriveLibraryStats(entries: AnimeEntry[]): LibraryStats {
@@ -142,7 +154,15 @@ export function combineEpisodesWithProgress(
   }));
 }
 
-export type KeyboardShortcutAction = "search" | "settings" | "closeSheet";
+export type KeyboardShortcutAction =
+  | "search"
+  | "settings"
+  | "export"
+  | "refreshDetail"
+  | "viewGallery"
+  | "viewList"
+  | "viewGrid"
+  | "closeSheet";
 
 export function keyboardShortcutAction(
   event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey">,
@@ -156,10 +176,35 @@ export function keyboardShortcutAction(
   if (command && event.key === ",") {
     return "settings";
   }
+  if (command && key === "e") {
+    return "export";
+  }
+  if (command && key === "r") {
+    return "refreshDetail";
+  }
+  if (command && event.key === "1") {
+    return "viewGallery";
+  }
+  if (command && event.key === "2") {
+    return "viewList";
+  }
+  if (command && event.key === "3") {
+    return "viewGrid";
+  }
   if (event.key === "Escape") {
     return "closeSheet";
   }
   return null;
+}
+
+export function buildPreferences(
+  current: AppPreferences,
+  updates: Pick<AppPreferences, "libraryViewStyle" | "sort" | "sortReversed">,
+): AppPreferences {
+  return {
+    ...current,
+    ...updates,
+  };
 }
 
 function countStatus(entries: AnimeEntry[], status: WatchStatus): number {

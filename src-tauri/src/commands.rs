@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 
-use crate::models::{AnimeDetail, AnimeEntry, AppStatePayload, BasicInfo, EpisodeProgress, MediaType};
+use crate::models::{
+    AnimeDetail, AnimeEntry, AppPreferences, AppStatePayload, BasicInfo, EpisodeProgress, MediaType,
+};
 use crate::repository::{LibraryRepository, RepositoryError};
 use crate::tmdb::{TmdbClient, TmdbError};
 
@@ -42,6 +44,18 @@ pub fn get_app_state(state: State<'_, AppRuntimeState>) -> Result<AppStatePayloa
 #[tauri::command]
 pub fn save_api_key(api_key: String, state: State<'_, AppRuntimeState>) -> Result<AppStatePayload, String> {
     state.repository.save_api_key(api_key.trim()).map_err(command_error)?;
+    state.repository.app_state().map_err(command_error)
+}
+
+#[tauri::command]
+pub fn save_preferences(
+    preferences: AppPreferences,
+    state: State<'_, AppRuntimeState>,
+) -> Result<AppStatePayload, String> {
+    state
+        .repository
+        .save_preferences(&preferences)
+        .map_err(command_error)?;
     state.repository.app_state().map_err(command_error)
 }
 

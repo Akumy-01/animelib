@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPreferences,
   chunkBatchPrompts,
   combineEpisodesWithProgress,
   deriveLibraryStats,
@@ -7,7 +8,9 @@ import {
   filterEntries,
   parseBatchPrompts,
   parseBackupState,
+  shouldRenderRemoteImage,
   sortEntries,
+  updateQueryFilter,
   updateEntryInList,
 } from "./library";
 
@@ -33,6 +36,19 @@ describe("filterEntries", () => {
   });
 });
 
+describe("updateQueryFilter", () => {
+  it("stores trimmed query text and clears empty queries", () => {
+    expect(updateQueryFilter({ status: "all" }, "  frieren  ")).toEqual({
+      status: "all",
+      query: "frieren",
+    });
+    expect(updateQueryFilter({ status: "all", query: "frieren" }, "   ")).toEqual({
+      status: "all",
+      query: undefined,
+    });
+  });
+});
+
 describe("updateEntryInList", () => {
   it("replaces one entry without changing others", () => {
     const entries = [
@@ -42,6 +58,15 @@ describe("updateEntryInList", () => {
     const updated = updateEntryInList(entries, { id: "2", name: "C" } as any);
 
     expect(updated.map((entry) => entry.name)).toEqual(["A", "C"]);
+  });
+});
+
+describe("shouldRenderRemoteImage", () => {
+  it("uses fallback artwork when a remote image is missing or failed", () => {
+    expect(shouldRenderRemoteImage("https://image.tmdb.org/poster.jpg", false)).toBe(true);
+    expect(shouldRenderRemoteImage("https://image.tmdb.org/poster.jpg", true)).toBe(false);
+    expect(shouldRenderRemoteImage(null, false)).toBe(false);
+    expect(shouldRenderRemoteImage("   ", false)).toBe(false);
   });
 });
 
@@ -120,6 +145,40 @@ describe("keyboardShortcutAction", () => {
   it("maps desktop shortcuts to app actions", () => {
     expect(keyboardShortcutAction({ key: "k", ctrlKey: true } as KeyboardEvent)).toBe("search");
     expect(keyboardShortcutAction({ key: ",", ctrlKey: true } as KeyboardEvent)).toBe("settings");
+    expect(keyboardShortcutAction({ key: "e", ctrlKey: true } as KeyboardEvent)).toBe("export");
+    expect(keyboardShortcutAction({ key: "r", ctrlKey: true } as KeyboardEvent)).toBe("refreshDetail");
+    expect(keyboardShortcutAction({ key: "1", ctrlKey: true } as KeyboardEvent)).toBe("viewGallery");
+    expect(keyboardShortcutAction({ key: "2", ctrlKey: true } as KeyboardEvent)).toBe("viewList");
+    expect(keyboardShortcutAction({ key: "3", ctrlKey: true } as KeyboardEvent)).toBe("viewGrid");
     expect(keyboardShortcutAction({ key: "Escape", ctrlKey: false } as KeyboardEvent)).toBe("closeSheet");
+  });
+});
+
+describe("buildPreferences", () => {
+  it("updates library controls without losing existing preference fields", () => {
+    const preferences = buildPreferences(
+      {
+        libraryViewStyle: "gallery",
+        sort: "dateSaved",
+        sortReversed: false,
+        scoringEnabled: false,
+        preferredLanguage: "ja-JP",
+        theme: "warm",
+      },
+      {
+        libraryViewStyle: "list",
+        sort: "title",
+        sortReversed: true,
+      },
+    );
+
+    expect(preferences).toEqual({
+      libraryViewStyle: "list",
+      sort: "title",
+      sortReversed: true,
+      scoringEnabled: false,
+      preferredLanguage: "ja-JP",
+      theme: "warm",
+    });
   });
 });

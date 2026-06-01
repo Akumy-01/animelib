@@ -108,6 +108,28 @@ mod tests {
     }
 
     #[test]
+    fn repository_persists_preferences() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = LibraryRepository::open(temp.path().join("library.sqlite")).expect("repo");
+        let preferences = AppPreferences {
+            library_view_style: LibraryViewStyle::List,
+            sort: LibrarySort::Title,
+            sort_reversed: true,
+            scoring_enabled: true,
+            preferred_language: "ja-JP".into(),
+            theme: "warm".into(),
+        };
+
+        repo.save_preferences(&preferences).expect("save preferences");
+
+        let saved = repo.load_preferences().expect("load preferences");
+        assert_eq!(saved.library_view_style, LibraryViewStyle::List);
+        assert_eq!(saved.sort, LibrarySort::Title);
+        assert!(saved.sort_reversed);
+        assert_eq!(saved.preferred_language, "ja-JP");
+    }
+
+    #[test]
     fn repository_persists_detail_and_episode_progress() {
         let temp = tempfile::tempdir().expect("temp dir");
         let repo = LibraryRepository::open(temp.path().join("library.sqlite")).expect("repo");
@@ -214,6 +236,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_app_state,
             save_api_key,
+            save_preferences,
             search_tmdb,
             add_entry,
             update_entry,

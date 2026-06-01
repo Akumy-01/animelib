@@ -28,11 +28,13 @@ import {
   refreshEntryDetail,
   restoreBackup,
   saveApiKey,
+  savePreferences,
   searchTmdb,
   setEpisodeWatched,
   updateEntry,
 } from "./api";
 import {
+  buildPreferences,
   combineEpisodesWithProgress,
   deriveLibraryStats,
   filterEntries,
@@ -40,13 +42,16 @@ import {
   chunkBatchPrompts,
   keyboardShortcutAction,
   parseBatchPrompts,
+  shouldRenderRemoteImage,
   sortEntries,
+  updateQueryFilter,
   updateEntryInList,
   watchStatusLabel,
 } from "./library";
 import type {
   AnimeDetail,
   AnimeEntry,
+  AppPreferences,
   BasicInfo,
   EpisodeProgress,
   LibraryFilters,
@@ -61,6 +66,15 @@ const watchStatuses: WatchStatus[] = ["planToWatch", "watching", "watched", "dro
 const viewStyles: LibraryViewStyle[] = ["gallery", "list", "grid"];
 const sortOptions: LibrarySort[] = ["dateSaved", "title", "releaseDate", "score"];
 
+const defaultPreferences: AppPreferences = {
+  libraryViewStyle: "gallery",
+  sort: "dateSaved",
+  sortReversed: false,
+  scoringEnabled: true,
+  preferredLanguage: "zh-CN",
+  theme: "warm",
+};
+
 export function App() {
   const [entries, setEntries] = useState<AnimeEntry[]>([]);
   const [hasApiKey, setHasApiKey] = useState(false);
@@ -68,6 +82,13 @@ export function App() {
   const [viewStyle, setViewStyle] = useState<LibraryViewStyle>("gallery");
   const [sort, setSort] = useState<LibrarySort>("dateSaved");
   const [sortReversed, setSortReversed] = useState(false);
+  const [preferenceBase, setPreferenceBase] = useState<
+    Pick<AppPreferences, "scoringEnabled" | "preferredLanguage" | "theme">
+  >({
+    scoringEnabled: defaultPreferences.scoringEnabled,
+    preferredLanguage: defaultPreferences.preferredLanguage,
+    theme: defaultPreferences.theme,
+  });
   const [filters, setFilters] = useState<LibraryFilters>({ status: "all" });
   const [sheet, setSheet] = useState<Sheet>(null);
   const [details, setDetails] = useState<Record<string, AnimeDetail | null>>({});
@@ -83,6 +104,11 @@ export function App() {
         setViewStyle(state.preferences.libraryViewStyle);
         setSort(state.preferences.sort);
         setSortReversed(state.preferences.sortReversed);
+        setPreferenceBase({
+          scoringEnabled: state.preferences.scoringEnabled,
+          preferredLanguage: state.preferences.preferredLanguage,
+          theme: state.preferences.theme,
+        });
         setSelectedId(state.entries[0]?.id ?? null);
         if (!state.hasApiKey) {
           setSheet("settings");
@@ -92,34 +118,37 @@ export function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    function handleKeydown(event: KeyboardEvent) {
-      const action = keyboardShortcutAction(event);
-      if (!action) {
-        return;
-      }
-
-      event.preventDefault();
-      if (action === "search") {
-        setSheet("search");
-      } else if (action === "settings") {
-        setSheet("settings");
-      } else {
-        setSheet(null);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
-  }, []);
-
   const visibleEntries = useMemo(
     () => sortEntries(filterEntries(entries, filters), sort, sortReversed),
     [entries, filters, sort, sortReversed],
   );
+  const preferences = useMemo(
+    () =>
+      buildPreferences(
+        {
+          ...preferenceBase,
+          libraryViewStyle: viewStyle,
+          sort,
+          sortReversed,
+        },
+        {
+          libraryViewStyle: viewStyle,
+          sort,
+          sortReversed,
+        },
+      ),
+    [preferenceBase, sort, sortReversed, viewStyle],
+  );
   const stats = useMemo(() => deriveLibraryStats(entries), [entries]);
   const selectedEntry =
     entries.find((entry) => entry.id === selectedId) ?? visibleEntries[0] ?? entries[0] ?? null;
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+    savePreferences(preferences).catch((error) => setToast(String(error)));
+  }, [loading, preferences]);
 
   async function persistEntry(entry: AnimeEntry) {
     const saved = await updateEntry(entry);
@@ -159,6 +188,37 @@ export function App() {
     setEntries(state.entries);
     setSelectedId(state.entries[0]?.id ?? null);
   }
+
+  useEffect(() => {
+    function handleKeydown(event: KeyboardEvent) {
+      const action = keyboardShortcutAction(event);
+      if (!action) {
+        return;
+      }
+
+      event.preventDefault();
+      if (action === "search") {
+        setSheet("search");
+      } else if (action === "settings") {
+        setSheet("settings");
+      } else if (action === "export") {
+        setSheet("export");
+      } else if (action === "refreshDetail" && selectedEntry) {
+        void refreshDetail(selectedEntry);
+      } else if (action === "viewGallery") {
+        setViewStyle("gallery");
+      } else if (action === "viewList") {
+        setViewStyle("list");
+      } else if (action === "viewGrid") {
+        setViewStyle("grid");
+      } else if (action === "closeSheet") {
+        setSheet(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  }, [selectedEntry]);
 
   return (
     <main className="app-shell">
@@ -226,6 +286,15 @@ export function App() {
             ))}
           </div>
 
+          <label className="filter-search" aria-label="Filter library by title">
+            <Search size={16} />
+            <input
+              value={filters.query ?? ""}
+              onChange={(event) => setFilters(updateQueryFilter(filters, event.target.value))}
+              placeholder="Filter title"
+            />
+          </label>
+
           <button className="filter-pill" onClick={() => setFilters({ ...filters, favoriteOnly: !filters.favoriteOnly })}>
             <Heart size={16} fill={filters.favoriteOnly ? "currentColor" : "none"} />
             {filters.favoriteOnly ? "Favorites" : "All"}
@@ -261,6 +330,7 @@ export function App() {
       {sheet === "search" && (
         <SearchSheet
           hasApiKey={hasApiKey}
+          initialLanguage={preferences.preferredLanguage}
           onClose={() => setSheet(null)}
           onAdd={async (info) => {
             const entry = await addEntry(info);
@@ -291,6 +361,11 @@ export function App() {
             setViewStyle(state.preferences.libraryViewStyle);
             setSort(state.preferences.sort);
             setSortReversed(state.preferences.sortReversed);
+            setPreferenceBase({
+              scoringEnabled: state.preferences.scoringEnabled,
+              preferredLanguage: state.preferences.preferredLanguage,
+              theme: state.preferences.theme,
+            });
             setSelectedId(state.entries[0]?.id ?? null);
             setToast("Library restored");
           }}
@@ -333,8 +408,9 @@ function EntryCard({
 }
 
 function Poster({ entry }: { entry: AnimeEntry }) {
-  if (entry.posterUrl) {
-    return <img className="poster" src={entry.posterUrl} alt="" />;
+  const [failed, setFailed] = useState(false);
+  if (shouldRenderRemoteImage(entry.posterUrl, failed)) {
+    return <img className="poster" src={entry.posterUrl ?? ""} alt="" onError={() => setFailed(true)} />;
   }
   return (
     <div className="poster poster-fallback">
@@ -499,11 +575,13 @@ function DetailPanel({
 
 function SearchSheet({
   hasApiKey,
+  initialLanguage,
   onClose,
   onAdd,
   onNeedApiKey,
 }: {
   hasApiKey: boolean;
+  initialLanguage: string;
   onClose: () => void;
   onAdd: (info: BasicInfo) => Promise<void>;
   onNeedApiKey: () => void;
@@ -511,7 +589,7 @@ function SearchSheet({
   const [mode, setMode] = useState<"regular" | "batch">("regular");
   const [query, setQuery] = useState("Frieren");
   const [batchInput, setBatchInput] = useState("Frieren\nAkira\nDemon Slayer");
-  const [language, setLanguage] = useState("zh-CN");
+  const [language, setLanguage] = useState(initialLanguage);
   const [results, setResults] = useState<BasicInfo[]>([]);
   const [batchResults, setBatchResults] = useState<Array<{ prompt: string; result: BasicInfo | null }>>([]);
   const [busy, setBusy] = useState(false);
