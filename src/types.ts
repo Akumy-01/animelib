@@ -48,7 +48,27 @@ export interface LibraryFilters {
   query?: string;
 }
 
+export interface AppPreferences {
+  libraryViewStyle: LibraryViewStyle;
+  sort: LibrarySort;
+  sortReversed: boolean;
+  scoringEnabled: boolean;
+  preferredLanguage: string;
+  theme: string;
+}
+
 export interface AppState {
   entries: AnimeEntry[];
+  preferences: AppPreferences;
   hasApiKey: boolean;
+}
+
+export interface LibraryStats {
+  total: number;
+  planToWatch: number;
+  watching: number;
+  watched: number;
+  dropped: number;
+  favorites: number;
+  averageScore: number | null;
 }

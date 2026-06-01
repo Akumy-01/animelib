@@ -1,4 +1,4 @@
-import type { AnimeEntry, LibraryFilters, LibrarySort } from "./types";
+import type { AnimeEntry, LibraryFilters, LibrarySort, LibraryStats, WatchStatus } from "./types";
 
 export function sortEntries(
   entries: AnimeEntry[],
@@ -39,6 +39,52 @@ export function filterEntries(entries: AnimeEntry[], filters: LibraryFilters): A
 
 export function updateEntryInList(entries: AnimeEntry[], updated: AnimeEntry): AnimeEntry[] {
   return entries.map((entry) => (entry.id === updated.id ? updated : entry));
+}
+
+export function deriveLibraryStats(entries: AnimeEntry[]): LibraryStats {
+  const scored = entries
+    .map((entry) => entry.score)
+    .filter((score): score is number => typeof score === "number");
+  const averageScore =
+    scored.length === 0 ? null : scored.reduce((sum, score) => sum + score, 0) / scored.length;
+
+  return {
+    total: entries.length,
+    planToWatch: countStatus(entries, "planToWatch"),
+    watching: countStatus(entries, "watching"),
+    watched: countStatus(entries, "watched"),
+    dropped: countStatus(entries, "dropped"),
+    favorites: entries.filter((entry) => entry.favorite).length,
+    averageScore,
+  };
+}
+
+export function watchStatusLabel(status: WatchStatus): string {
+  switch (status) {
+    case "watching":
+      return "Watching";
+    case "watched":
+      return "Watched";
+    case "dropped":
+      return "Dropped";
+    case "planToWatch":
+      return "Planned";
+  }
+}
+
+export function mediaTypeLabel(mediaType: AnimeEntry["mediaType"]): string {
+  switch (mediaType) {
+    case "movie":
+      return "Movie";
+    case "series":
+      return "Series";
+    case "season":
+      return "Season";
+  }
+}
+
+function countStatus(entries: AnimeEntry[], status: WatchStatus): number {
+  return entries.filter((entry) => entry.watchStatus === status).length;
 }
 
 function compareNullableDates(left?: string | null, right?: string | null): number {
