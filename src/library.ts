@@ -83,6 +83,23 @@ export function mediaTypeLabel(mediaType: AnimeEntry["mediaType"]): string {
   }
 }
 
+export function parseBatchPrompts(input: string): string[] {
+  return input
+    .replace(/\\r\\n|\\n|\\r/g, "\n")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+export function chunkBatchPrompts(prompts: string[], chunkSize = 8): string[][] {
+  const normalizedChunkSize = Math.max(1, chunkSize);
+  const chunks: string[][] = [];
+  for (let index = 0; index < prompts.length; index += normalizedChunkSize) {
+    chunks.push(prompts.slice(index, index + normalizedChunkSize));
+  }
+  return chunks;
+}
+
 function countStatus(entries: AnimeEntry[], status: WatchStatus): number {
   return entries.filter((entry) => entry.watchStatus === status).length;
 }

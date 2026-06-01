@@ -334,6 +334,10 @@ textarea {
   align-items: center;
 }
 
+.search-row:has(.batch-input) {
+  align-items: stretch;
+}
+
 .bottom-bar {
   padding: 8px;
   border-radius: 999px;
@@ -392,6 +396,33 @@ textarea {
   justify-content: space-between;
 }
 
+.sheet-tabs {
+  display: inline-flex;
+  width: fit-content;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #f1e5d8;
+}
+
+.sheet-tabs button {
+  min-width: 92px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-weight: 750;
+}
+
+.sheet-tabs button.active {
+  background: white;
+  color: #2f5c75;
+}
+
+.batch-input {
+  min-height: 112px;
+}
+
 .search-results {
   display: grid;
   gap: 10px;
@@ -416,6 +447,23 @@ textarea {
   border-radius: 8px;
   object-fit: cover;
   background: linear-gradient(135deg, #d7a76d, #2f5c75);
+}
+
+.result-row.no-result {
+  cursor: default;
+  color: #68717a;
+}
+
+.prompt-label {
+  display: inline-block;
+  margin-bottom: 3px;
+  color: #7f6d5e;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.add-all-button {
+  justify-self: start;
 }
 
 .settings-card {

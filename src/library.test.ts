@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { deriveLibraryStats, filterEntries, sortEntries, updateEntryInList } from "./library";
+import {
+  chunkBatchPrompts,
+  deriveLibraryStats,
+  filterEntries,
+  parseBatchPrompts,
+  sortEntries,
+  updateEntryInList,
+} from "./library";
 
 describe("sortEntries", () => {
   it("sorts entries by saved date descending by default", () => {
@@ -47,5 +54,25 @@ describe("deriveLibraryStats", () => {
     expect(stats.watching).toBe(2);
     expect(stats.favorites).toBe(2);
     expect(stats.averageScore).toBe(4);
+  });
+});
+
+describe("parseBatchPrompts", () => {
+  it("trims lines, removes empty rows, and preserves order", () => {
+    expect(parseBatchPrompts(" Frieren \\n\\nAkira\\n  Demon Slayer  ")).toEqual([
+      "Frieren",
+      "Akira",
+      "Demon Slayer",
+    ]);
+  });
+});
+
+describe("chunkBatchPrompts", () => {
+  it("chunks prompts by a positive chunk size", () => {
+    expect(chunkBatchPrompts(["a", "b", "c", "d", "e"], 2)).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+      ["e"],
+    ]);
   });
 });

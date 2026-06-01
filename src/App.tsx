@@ -31,6 +31,8 @@ import {
   deriveLibraryStats,
   filterEntries,
   mediaTypeLabel,
+  chunkBatchPrompts,
+  parseBatchPrompts,
   sortEntries,
   updateEntryInList,
   watchStatusLabel,
@@ -360,9 +362,12 @@ function SearchSheet({
   onAdd: (info: BasicInfo) => Promise<void>;
   onNeedApiKey: () => void;
 }) {
+  const [mode, setMode] = useState<"regular" | "batch">("regular");
   const [query, setQuery] = useState("Frieren");
+  const [batchInput, setBatchInput] = useState("Frieren\nAkira\nDemon Slayer");
   const [language, setLanguage] = useState("zh-CN");
   const [results, setResults] = useState<BasicInfo[]>([]);
+  const [batchResults, setBatchResults] = useState<Array<{ prompt: string; result: BasicInfo | null }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -374,7 +379,26 @@ function SearchSheet({
     setBusy(true);
     setError(null);
     try {
-      setResults(await searchTmdb(query, language));
+      if (mode === "regular") {
+        setResults(await searchTmdb(query, language));
+      } else {
+        const prompts = parseBatchPrompts(batchInput);
+        if (prompts.length === 0) {
+          setBatchResults([]);
+          return;
+        }
+        const resolved: Array<{ prompt: string; result: BasicInfo | null }> = [];
+        for (const chunk of chunkBatchPrompts(prompts, 4)) {
+          const chunkResults = await Promise.all(
+            chunk.map(async (prompt) => {
+              const promptResults = await searchTmdb(prompt, language);
+              return { prompt, result: promptResults[0] ?? null };
+            }),
+          );
+          resolved.push(...chunkResults);
+        }
+        setBatchResults(resolved);
+      }
     } catch (searchError) {
       setError(String(searchError));
     } finally {
@@ -384,8 +408,25 @@ function SearchSheet({
 
   return (
     <Sheet title="Search TMDb" onClose={onClose}>
+      <div className="sheet-tabs">
+        <button className={mode === "regular" ? "active" : ""} onClick={() => setMode("regular")}>
+          Regular
+        </button>
+        <button className={mode === "batch" ? "active" : ""} onClick={() => setMode("batch")}>
+          Batch
+        </button>
+      </div>
       <div className="search-row">
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Anime title" />
+        {mode === "regular" ? (
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Anime title" />
+        ) : (
+          <textarea
+            className="batch-input"
+            value={batchInput}
+            onChange={(event) => setBatchInput(event.target.value)}
+            placeholder="One title per line"
+          />
+        )}
         <select value={language} onChange={(event) => setLanguage(event.target.value)}>
           <option value="zh-CN">Chinese</option>
           <option value="en-US">English</option>
@@ -396,19 +437,66 @@ function SearchSheet({
         </button>
       </div>
       {error && <p className="error-text">{error}</p>}
-      <div className="search-results">
-        {results.map((result) => (
-          <button key={`${result.mediaType}-${result.tmdbId}`} className="result-row" onClick={() => onAdd(result)}>
-            {result.posterUrl ? <img src={result.posterUrl} alt="" /> : <div className="mini-poster" />}
-            <div>
-              <h3>{result.name}</h3>
-              <p>{mediaTypeLabel(result.mediaType as AnimeEntry["mediaType"])} · {result.onAirDate?.slice(0, 4) ?? "Unknown"}</p>
-            </div>
-            <Plus size={18} />
-          </button>
-        ))}
-      </div>
+      {mode === "regular" ? (
+        <div className="search-results">
+          {results.map((result) => (
+            <ResultRow key={`${result.mediaType}-${result.tmdbId}`} result={result} onAdd={onAdd} />
+          ))}
+        </div>
+      ) : (
+        <div className="search-results">
+          {batchResults.length > 0 && (
+            <button
+              className="primary-button add-all-button"
+              onClick={async () => {
+                for (const item of batchResults) {
+                  if (item.result) {
+                    await onAdd(item.result);
+                  }
+                }
+              }}
+            >
+              <Plus size={18} /> Add All Found
+            </button>
+          )}
+          {batchResults.map((item) =>
+            item.result ? (
+              <ResultRow key={`${item.prompt}-${item.result.tmdbId}`} result={item.result} onAdd={onAdd} prompt={item.prompt} />
+            ) : (
+              <div key={item.prompt} className="result-row no-result">
+                <div className="mini-poster" />
+                <div>
+                  <h3>{item.prompt}</h3>
+                  <p>No TMDb result found.</p>
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+      )}
     </Sheet>
+  );
+}
+
+function ResultRow({
+  result,
+  prompt,
+  onAdd,
+}: {
+  result: BasicInfo;
+  prompt?: string;
+  onAdd: (info: BasicInfo) => Promise<void>;
+}) {
+  return (
+    <button className="result-row" onClick={() => onAdd(result)}>
+      {result.posterUrl ? <img src={result.posterUrl} alt="" /> : <div className="mini-poster" />}
+      <div>
+        {prompt && <span className="prompt-label">{prompt}</span>}
+        <h3>{result.name}</h3>
+        <p>{mediaTypeLabel(result.mediaType as AnimeEntry["mediaType"])} · {result.onAirDate?.slice(0, 4) ?? "Unknown"}</p>
+      </div>
+      <Plus size={18} />
+    </button>
   );
 }
 
