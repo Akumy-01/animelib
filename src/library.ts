@@ -1,4 +1,12 @@
-import type { AnimeEntry, LibraryFilters, LibrarySort, LibraryStats, WatchStatus } from "./types";
+import type {
+  AnimeEntry,
+  AppPreferences,
+  AppState,
+  LibraryFilters,
+  LibrarySort,
+  LibraryStats,
+  WatchStatus,
+} from "./types";
 
 export function sortEntries(
   entries: AnimeEntry[],
@@ -98,6 +106,24 @@ export function chunkBatchPrompts(prompts: string[], chunkSize = 8): string[][] 
     chunks.push(prompts.slice(index, index + normalizedChunkSize));
   }
   return chunks;
+}
+
+export function parseBackupState(json: string): AppState {
+  const payload = JSON.parse(json) as {
+    entries?: AnimeEntry[];
+    preferences?: AppPreferences;
+  };
+  if (!Array.isArray(payload.entries)) {
+    throw new Error("Backup does not contain entries.");
+  }
+  if (!payload.preferences) {
+    throw new Error("Backup does not contain preferences.");
+  }
+  return {
+    entries: payload.entries,
+    preferences: payload.preferences,
+    hasApiKey: false,
+  };
 }
 
 function countStatus(entries: AnimeEntry[], status: WatchStatus): number {

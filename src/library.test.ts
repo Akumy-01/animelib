@@ -4,6 +4,7 @@ import {
   deriveLibraryStats,
   filterEntries,
   parseBatchPrompts,
+  parseBackupState,
   sortEntries,
   updateEntryInList,
 } from "./library";
@@ -74,5 +75,26 @@ describe("chunkBatchPrompts", () => {
       ["c", "d"],
       ["e"],
     ]);
+  });
+});
+
+describe("parseBackupState", () => {
+  it("parses an AniShelf export payload into app state entries", () => {
+    const state = parseBackupState(
+      JSON.stringify({
+        entries: [{ id: "movie-1", name: "Restored", watchStatus: "watched" }],
+        preferences: {
+          libraryViewStyle: "list",
+          sort: "title",
+          sortReversed: false,
+          scoringEnabled: true,
+          preferredLanguage: "zh-CN",
+          theme: "warm",
+        },
+      }),
+    );
+
+    expect(state.entries[0].name).toBe("Restored");
+    expect(state.preferences.libraryViewStyle).toBe("list");
   });
 });

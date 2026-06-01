@@ -23,6 +23,7 @@ import {
   deleteEntry,
   exportLibrary,
   getAppState,
+  restoreBackup,
   saveApiKey,
   searchTmdb,
   updateEntry,
@@ -209,7 +210,19 @@ export function App() {
         />
       )}
       {sheet === "profile" && <ProfileSheet stats={stats} onExport={() => setSheet("export")} onClose={() => setSheet(null)} />}
-      {sheet === "export" && <ExportSheet onClose={() => setSheet(null)} />}
+      {sheet === "export" && (
+        <ExportSheet
+          onClose={() => setSheet(null)}
+          onRestore={(state) => {
+            setEntries(state.entries);
+            setViewStyle(state.preferences.libraryViewStyle);
+            setSort(state.preferences.sort);
+            setSortReversed(state.preferences.sortReversed);
+            setSelectedId(state.entries[0]?.id ?? null);
+            setToast("Library restored");
+          }}
+        />
+      )}
 
       {toast && (
         <button className="toast" onClick={() => setToast(null)}>
@@ -552,14 +565,46 @@ function ProfileSheet({
   );
 }
 
-function ExportSheet({ onClose }: { onClose: () => void }) {
+function ExportSheet({
+  onClose,
+  onRestore,
+}: {
+  onClose: () => void;
+  onRestore: (state: Awaited<ReturnType<typeof restoreBackup>>) => void;
+}) {
   const [payload, setPayload] = useState("");
+  const [restoreInput, setRestoreInput] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
   useEffect(() => {
     exportLibrary().then(setPayload).catch((error) => setPayload(String(error)));
   }, []);
   return (
     <Sheet title="Export" onClose={onClose}>
       <textarea className="export-box" readOnly value={payload} />
+      <section className="restore-panel">
+        <h3>Restore Backup</h3>
+        <p>Paste an AniShelf Windows JSON export to replace the current local library.</p>
+        <textarea
+          value={restoreInput}
+          onChange={(event) => setRestoreInput(event.target.value)}
+          placeholder="Paste backup JSON"
+        />
+        <button
+          className="danger-button"
+          onClick={async () => {
+            try {
+              const state = await restoreBackup(restoreInput);
+              onRestore(state);
+              setMessage("Restore complete.");
+            } catch (error) {
+              setMessage(String(error));
+            }
+          }}
+        >
+          Restore
+        </button>
+        {message && <p className="restore-message">{message}</p>}
+      </section>
     </Sheet>
   );
 }

@@ -93,6 +93,7 @@ pub fn create_backup(state: State<'_, AppRuntimeState>) -> Result<String, String
 
 #[tauri::command]
 pub fn restore_backup(_backup_json: String, state: State<'_, AppRuntimeState>) -> Result<AppStatePayload, String> {
+    state.repository.restore_json(&_backup_json).map_err(command_error)?;
     state.repository.app_state().map_err(command_error)
 }
 

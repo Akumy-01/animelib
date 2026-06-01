@@ -2,12 +2,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::models::{
     AnimeEntry, AppPreferences, AppStatePayload, MediaType, WatchStatus,
 };
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportPayload {
+    app: String,
+    format_version: u8,
+    entries: Vec<AnimeEntry>,
+    preferences: AppPreferences,
+}
 
 #[derive(Debug, Error)]
 pub enum RepositoryError {
@@ -74,41 +83,7 @@ impl LibraryRepository {
 
     pub fn insert_entry(&self, entry: &AnimeEntry) -> RepositoryResult<()> {
         let connection = self.connection()?;
-        let is_date_tracking_enabled = entry.is_date_tracking_enabled as i64;
-        let favorite = entry.favorite as i64;
-        let using_custom_poster = entry.using_custom_poster as i64;
-        connection.execute(
-            "INSERT OR REPLACE INTO anime_entries (
-                id, tmdb_id, media_type, season_number, parent_series_id, name, overview,
-                poster_url, backdrop_url, details_url, original_language_code, on_air_date,
-                watch_status, date_saved, date_started, date_finished,
-                is_date_tracking_enabled, score, favorite, notes, using_custom_poster
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
-            params![
-                entry.id,
-                entry.tmdb_id,
-                entry.media_type.as_str(),
-                entry.season_number,
-                entry.parent_series_id,
-                entry.name,
-                entry.overview,
-                entry.poster_url,
-                entry.backdrop_url,
-                entry.details_url,
-                entry.original_language_code,
-                entry.on_air_date,
-                entry.watch_status.as_str(),
-                entry.date_saved,
-                entry.date_started,
-                entry.date_finished,
-                is_date_tracking_enabled,
-                entry.score,
-                favorite,
-                entry.notes,
-                using_custom_poster,
-            ],
-        )?;
-        Ok(())
+        insert_entry_with_connection(&connection, entry)
     }
 
     pub fn update_entry(&self, entry: &AnimeEntry) -> RepositoryResult<()> {
@@ -141,22 +116,32 @@ impl LibraryRepository {
     }
 
     pub fn export_json(&self) -> RepositoryResult<String> {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct ExportPayload {
-            app: &'static str,
-            format_version: u8,
-            entries: Vec<AnimeEntry>,
-            preferences: AppPreferences,
-        }
-
         let payload = ExportPayload {
-            app: "AniShelf Windows",
+            app: "AniShelf Windows".into(),
             format_version: 1,
             entries: self.list_entries()?,
             preferences: self.load_preferences()?,
         };
         Ok(serde_json::to_string_pretty(&payload)?)
+    }
+
+    pub fn restore_json(&self, payload_json: &str) -> RepositoryResult<()> {
+        let payload: ExportPayload = serde_json::from_str(payload_json)?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute("DELETE FROM anime_entries", [])?;
+        transaction.execute("DELETE FROM settings WHERE key = 'preferences'", [])?;
+
+        for entry in payload.entries {
+            insert_entry_with_connection(&transaction, &entry)?;
+        }
+
+        transaction.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params!["preferences", serde_json::to_string(&payload.preferences)?],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     fn initialize(&self) -> RepositoryResult<()> {
@@ -220,6 +205,44 @@ impl LibraryRepository {
     fn connection(&self) -> RepositoryResult<std::sync::MutexGuard<'_, Connection>> {
         self.connection.lock().map_err(|_| RepositoryError::LockPoisoned)
     }
+}
+
+fn insert_entry_with_connection(connection: &Connection, entry: &AnimeEntry) -> RepositoryResult<()> {
+    let is_date_tracking_enabled = entry.is_date_tracking_enabled as i64;
+    let favorite = entry.favorite as i64;
+    let using_custom_poster = entry.using_custom_poster as i64;
+    connection.execute(
+        "INSERT OR REPLACE INTO anime_entries (
+            id, tmdb_id, media_type, season_number, parent_series_id, name, overview,
+            poster_url, backdrop_url, details_url, original_language_code, on_air_date,
+            watch_status, date_saved, date_started, date_finished,
+            is_date_tracking_enabled, score, favorite, notes, using_custom_poster
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+        params![
+            entry.id,
+            entry.tmdb_id,
+            entry.media_type.as_str(),
+            entry.season_number,
+            entry.parent_series_id,
+            entry.name,
+            entry.overview,
+            entry.poster_url,
+            entry.backdrop_url,
+            entry.details_url,
+            entry.original_language_code,
+            entry.on_air_date,
+            entry.watch_status.as_str(),
+            entry.date_saved,
+            entry.date_started,
+            entry.date_finished,
+            is_date_tracking_enabled,
+            entry.score,
+            favorite,
+            entry.notes,
+            using_custom_poster,
+        ],
+    )?;
+    Ok(())
 }
 
 fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<AnimeEntry> {

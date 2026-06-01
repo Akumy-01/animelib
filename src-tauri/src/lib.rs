@@ -66,6 +66,46 @@ mod tests {
         assert!(url.contains("language=zh-CN"));
         assert!(url.contains("page=1"));
     }
+
+    #[test]
+    fn repository_restores_export_payload() {
+        let source_dir = tempfile::tempdir().expect("source temp dir");
+        let source = LibraryRepository::open(source_dir.path().join("library.sqlite")).expect("source repo");
+        let info = BasicInfo {
+            tmdb_id: 88,
+            media_type: MediaType::Movie,
+            name: "Restored Movie".into(),
+            overview: Some("From backup".into()),
+            poster_url: None,
+            backdrop_url: None,
+            on_air_date: Some("2020-01-01".into()),
+            season_number: None,
+            parent_series_id: None,
+        };
+        source.insert_entry(&AnimeEntry::from_basic_info(info)).expect("insert source");
+        let payload = source.export_json().expect("export");
+
+        let target_dir = tempfile::tempdir().expect("target temp dir");
+        let target = LibraryRepository::open(target_dir.path().join("library.sqlite")).expect("target repo");
+        let old_info = BasicInfo {
+            tmdb_id: 99,
+            media_type: MediaType::Series,
+            name: "Old Entry".into(),
+            overview: None,
+            poster_url: None,
+            backdrop_url: None,
+            on_air_date: None,
+            season_number: None,
+            parent_series_id: None,
+        };
+        target.insert_entry(&AnimeEntry::from_basic_info(old_info)).expect("insert old");
+
+        target.restore_json(&payload).expect("restore");
+
+        let entries = target.list_entries().expect("entries");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "Restored Movie");
+    }
 }
 
 pub fn run() {
