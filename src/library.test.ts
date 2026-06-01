@@ -3,6 +3,7 @@ import {
   chunkBatchPrompts,
   combineEpisodesWithProgress,
   deriveLibraryStats,
+  keyboardShortcutAction,
   filterEntries,
   parseBatchPrompts,
   parseBackupState,
@@ -112,5 +113,13 @@ describe("combineEpisodesWithProgress", () => {
       { id: 1, episodeNumber: 1, title: "One", watched: false },
       { id: 2, episodeNumber: 2, title: "Two", watched: true },
     ]);
+  });
+});
+
+describe("keyboardShortcutAction", () => {
+  it("maps desktop shortcuts to app actions", () => {
+    expect(keyboardShortcutAction({ key: "k", ctrlKey: true } as KeyboardEvent)).toBe("search");
+    expect(keyboardShortcutAction({ key: ",", ctrlKey: true } as KeyboardEvent)).toBe("settings");
+    expect(keyboardShortcutAction({ key: "Escape", ctrlKey: false } as KeyboardEvent)).toBe("closeSheet");
   });
 });

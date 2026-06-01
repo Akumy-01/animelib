@@ -142,6 +142,26 @@ export function combineEpisodesWithProgress(
   }));
 }
 
+export type KeyboardShortcutAction = "search" | "settings" | "closeSheet";
+
+export function keyboardShortcutAction(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey">,
+): KeyboardShortcutAction | null {
+  const key = event.key.toLocaleLowerCase();
+  const command = event.ctrlKey || event.metaKey;
+
+  if (command && key === "k") {
+    return "search";
+  }
+  if (command && event.key === ",") {
+    return "settings";
+  }
+  if (event.key === "Escape") {
+    return "closeSheet";
+  }
+  return null;
+}
+
 function countStatus(entries: AnimeEntry[], status: WatchStatus): number {
   return entries.filter((entry) => entry.watchStatus === status).length;
 }

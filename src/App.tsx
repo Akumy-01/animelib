@@ -38,6 +38,7 @@ import {
   filterEntries,
   mediaTypeLabel,
   chunkBatchPrompts,
+  keyboardShortcutAction,
   parseBatchPrompts,
   sortEntries,
   updateEntryInList,
@@ -89,6 +90,27 @@ export function App() {
       })
       .catch((error) => setToast(String(error)))
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    function handleKeydown(event: KeyboardEvent) {
+      const action = keyboardShortcutAction(event);
+      if (!action) {
+        return;
+      }
+
+      event.preventDefault();
+      if (action === "search") {
+        setSheet("search");
+      } else if (action === "settings") {
+        setSheet("settings");
+      } else {
+        setSheet(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
   }, []);
 
   const visibleEntries = useMemo(
