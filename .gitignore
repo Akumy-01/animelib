@@ -11,3 +11,5 @@ src-tauri/gen/
 .env.*
 !/.env.example
 coverage/
+.dev-server/
+anishelf-preview.png
