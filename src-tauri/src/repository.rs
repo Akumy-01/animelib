@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::models::{
-    AnimeEntry, AppPreferences, AppStatePayload, MediaType, WatchStatus,
+    AnimeDetail, AnimeEntry, AppPreferences, AppStatePayload, EpisodeProgress, MediaType,
+    WatchStatus,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -96,6 +97,102 @@ impl LibraryRepository {
         Ok(())
     }
 
+    pub fn save_detail(&self, detail: &AnimeDetail) -> RepositoryResult<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT OR REPLACE INTO anime_details (
+                entry_id, language, title, subtitle, overview, status, air_date, vote_average,
+                runtime_minutes, episode_count, season_count, seasons_json, episodes_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                detail.entry_id,
+                detail.language,
+                detail.title,
+                detail.subtitle,
+                detail.overview,
+                detail.status,
+                detail.air_date,
+                detail.vote_average,
+                detail.runtime_minutes,
+                detail.episode_count,
+                detail.season_count,
+                serde_json::to_string(&detail.seasons)?,
+                serde_json::to_string(&detail.episodes)?,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn detail_for_entry(&self, entry_id: &str) -> RepositoryResult<Option<AnimeDetail>> {
+        let connection = self.connection()?;
+        let detail = connection
+            .query_row(
+                "SELECT entry_id, language, title, subtitle, overview, status, air_date,
+                        vote_average, runtime_minutes, episode_count, season_count,
+                        seasons_json, episodes_json
+                 FROM anime_details
+                 WHERE entry_id = ?1",
+                params![entry_id],
+                |row| {
+                    let seasons_json: String = row.get(11)?;
+                    let episodes_json: String = row.get(12)?;
+                    Ok((row_to_detail(row)?, seasons_json, episodes_json))
+                },
+            )
+            .optional()?;
+
+        match detail {
+            Some((mut detail, seasons_json, episodes_json)) => {
+                detail.seasons = serde_json::from_str(&seasons_json)?;
+                detail.episodes = serde_json::from_str(&episodes_json)?;
+                Ok(Some(detail))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn set_episode_watched(
+        &self,
+        entry_id: &str,
+        episode_number: i64,
+        watched: bool,
+    ) -> RepositoryResult<()> {
+        let connection = self.connection()?;
+        let watched_at = if watched {
+            Some(chrono::Utc::now().to_rfc3339())
+        } else {
+            None
+        };
+        connection.execute(
+            "INSERT OR REPLACE INTO episode_progresses
+                (entry_id, episode_number, watched, watched_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![entry_id, episode_number, watched as i64, watched_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn episode_progress_for_entry(&self, entry_id: &str) -> RepositoryResult<Vec<EpisodeProgress>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT entry_id, episode_number, watched, watched_at
+             FROM episode_progresses
+             WHERE entry_id = ?1
+             ORDER BY episode_number ASC",
+        )?;
+        let progress = statement
+            .query_map(params![entry_id], |row| {
+                Ok(EpisodeProgress {
+                    entry_id: row.get(0)?,
+                    episode_number: row.get(1)?,
+                    watched: row.get::<_, i64>(2)? != 0,
+                    watched_at: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(progress)
+    }
+
     pub fn save_api_key(&self, api_key: &str) -> RepositoryResult<()> {
         self.set_setting("tmdb_api_key", api_key)
     }
@@ -175,6 +272,32 @@ impl LibraryRepository {
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY NOT NULL,
                 value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS anime_details (
+                entry_id TEXT PRIMARY KEY NOT NULL,
+                language TEXT NOT NULL,
+                title TEXT NOT NULL,
+                subtitle TEXT,
+                overview TEXT,
+                status TEXT,
+                air_date TEXT,
+                vote_average REAL,
+                runtime_minutes INTEGER,
+                episode_count INTEGER,
+                season_count INTEGER,
+                seasons_json TEXT NOT NULL,
+                episodes_json TEXT NOT NULL,
+                FOREIGN KEY(entry_id) REFERENCES anime_entries(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS episode_progresses (
+                entry_id TEXT NOT NULL,
+                episode_number INTEGER NOT NULL,
+                watched INTEGER NOT NULL,
+                watched_at TEXT,
+                PRIMARY KEY(entry_id, episode_number),
+                FOREIGN KEY(entry_id) REFERENCES anime_entries(id) ON DELETE CASCADE
             );
             ",
         )?;
@@ -270,5 +393,23 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<AnimeEntry> {
         favorite: row.get::<_, i64>(18)? != 0,
         notes: row.get(19)?,
         using_custom_poster: row.get::<_, i64>(20)? != 0,
+    })
+}
+
+fn row_to_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<AnimeDetail> {
+    Ok(AnimeDetail {
+        entry_id: row.get(0)?,
+        language: row.get(1)?,
+        title: row.get(2)?,
+        subtitle: row.get(3)?,
+        overview: row.get(4)?,
+        status: row.get(5)?,
+        air_date: row.get(6)?,
+        vote_average: row.get(7)?,
+        runtime_minutes: row.get(8)?,
+        episode_count: row.get(9)?,
+        season_count: row.get(10)?,
+        seasons: Vec::new(),
+        episodes: Vec::new(),
     })
 }

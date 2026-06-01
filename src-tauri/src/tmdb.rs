@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::models::{BasicInfo, MediaType};
+use crate::models::{AnimeDetail, BasicInfo, EpisodeSummary, MediaType, SeasonSummary};
 
 const TMDB_API_BASE: &str = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_BASE: &str = "https://image.tmdb.org/t/p/w500";
@@ -13,6 +13,8 @@ pub enum TmdbError {
     MissingApiKey,
     #[error("network error: {0}")]
     Network(#[from] reqwest::Error),
+    #[error("parse error: {0}")]
+    Parse(#[from] serde_json::Error),
 }
 
 #[derive(Clone)]
@@ -76,6 +78,29 @@ impl TmdbClient {
         );
         Ok(results)
     }
+
+    pub async fn series_detail(
+        &self,
+        api_key: &str,
+        entry_id: &str,
+        tmdb_id: i64,
+        language: &str,
+    ) -> Result<AnimeDetail, TmdbError> {
+        if api_key.trim().is_empty() {
+            return Err(TmdbError::MissingApiKey);
+        }
+
+        let json = self
+            .http
+            .get(build_detail_url("tv", tmdb_id, language))
+            .query(&[("api_key", api_key)])
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+        parse_series_detail_json(entry_id, language, &json).map_err(TmdbError::Parse)
+    }
 }
 
 pub fn build_search_url(media_kind: &str, query: &str, language: &str, page: u32) -> String {
@@ -83,6 +108,44 @@ pub fn build_search_url(media_kind: &str, query: &str, language: &str, page: u32
         "{TMDB_API_BASE}/search/{media_kind}?query={}&language={language}&page={page}&include_adult=false",
         urlencoding::encode(query)
     )
+}
+
+pub fn build_detail_url(media_kind: &str, tmdb_id: i64, language: &str) -> String {
+    format!("{TMDB_API_BASE}/{media_kind}/{tmdb_id}?language={language}")
+}
+
+pub fn parse_series_detail_json(
+    entry_id: &str,
+    language: &str,
+    json: &str,
+) -> Result<AnimeDetail, serde_json::Error> {
+    let detail: TmdbSeriesDetail = serde_json::from_str(json)?;
+    Ok(AnimeDetail {
+        entry_id: entry_id.into(),
+        language: language.into(),
+        title: detail.name,
+        subtitle: detail.tagline.filter(|value| !value.is_empty()),
+        overview: detail.overview.filter(|value| !value.is_empty()),
+        status: detail.status.filter(|value| !value.is_empty()),
+        air_date: detail.first_air_date.filter(|value| !value.is_empty()),
+        vote_average: detail.vote_average,
+        runtime_minutes: detail.episode_run_time.and_then(|items| items.first().copied()),
+        episode_count: detail.number_of_episodes,
+        season_count: detail.number_of_seasons,
+        seasons: detail
+            .seasons
+            .unwrap_or_default()
+            .into_iter()
+            .map(|season| SeasonSummary {
+                id: season.id,
+                season_number: season.season_number,
+                title: season.name,
+                poster_url: image_url(season.poster_path),
+                episode_count: season.episode_count,
+            })
+            .collect(),
+        episodes: Vec::<EpisodeSummary>::new(),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +189,29 @@ struct TmdbSeriesResult {
     backdrop_path: Option<String>,
     first_air_date: Option<String>,
     genre_ids: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TmdbSeriesDetail {
+    name: String,
+    tagline: Option<String>,
+    overview: Option<String>,
+    status: Option<String>,
+    first_air_date: Option<String>,
+    vote_average: Option<f64>,
+    episode_run_time: Option<Vec<i64>>,
+    number_of_episodes: Option<i64>,
+    number_of_seasons: Option<i64>,
+    seasons: Option<Vec<TmdbSeasonSummary>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TmdbSeasonSummary {
+    id: i64,
+    season_number: i64,
+    name: String,
+    poster_path: Option<String>,
+    episode_count: Option<i64>,
 }
 
 impl TmdbSeriesResult {

@@ -106,6 +106,101 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "Restored Movie");
     }
+
+    #[test]
+    fn repository_persists_detail_and_episode_progress() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = LibraryRepository::open(temp.path().join("library.sqlite")).expect("repo");
+        let info = BasicInfo {
+            tmdb_id: 101,
+            media_type: MediaType::Series,
+            name: "Detail Series".into(),
+            overview: None,
+            poster_url: None,
+            backdrop_url: None,
+            on_air_date: None,
+            season_number: None,
+            parent_series_id: None,
+        };
+        let entry = AnimeEntry::from_basic_info(info);
+        repo.insert_entry(&entry).expect("insert entry");
+
+        let detail = AnimeDetail {
+            entry_id: entry.id.clone(),
+            language: "zh-CN".into(),
+            title: "Detail Series".into(),
+            subtitle: Some("Season overview".into()),
+            overview: Some("Long overview".into()),
+            status: Some("Returning Series".into()),
+            air_date: Some("2024-01-01".into()),
+            vote_average: Some(8.7),
+            runtime_minutes: Some(24),
+            episode_count: Some(12),
+            season_count: Some(1),
+            seasons: vec![SeasonSummary {
+                id: 501,
+                season_number: 1,
+                title: "Season 1".into(),
+                poster_url: None,
+                episode_count: Some(12),
+            }],
+            episodes: vec![
+                EpisodeSummary {
+                    id: 9001,
+                    episode_number: 1,
+                    title: "Departure".into(),
+                    air_date: Some("2024-01-01".into()),
+                    image_url: None,
+                    overview: Some("Episode one".into()),
+                },
+                EpisodeSummary {
+                    id: 9002,
+                    episode_number: 2,
+                    title: "Companion".into(),
+                    air_date: Some("2024-01-08".into()),
+                    image_url: None,
+                    overview: None,
+                },
+            ],
+        };
+
+        repo.save_detail(&detail).expect("save detail");
+        repo.set_episode_watched(&entry.id, 1, true).expect("watch episode");
+
+        let saved = repo.detail_for_entry(&entry.id).expect("detail").expect("detail exists");
+        let progress = repo.episode_progress_for_entry(&entry.id).expect("progress");
+        assert_eq!(saved.episodes.len(), 2);
+        assert_eq!(saved.seasons[0].title, "Season 1");
+        assert_eq!(progress[0].episode_number, 1);
+        assert!(progress[0].watched);
+    }
+
+    #[test]
+    fn maps_tmdb_series_detail_to_anime_detail() {
+        let detail = parse_series_detail_json(
+            "series-42",
+            "zh-CN",
+            r#"{
+                "name": "Series Title",
+                "tagline": "A quiet tagline",
+                "overview": "Series overview",
+                "status": "Returning Series",
+                "first_air_date": "2024-04-01",
+                "vote_average": 8.9,
+                "episode_run_time": [24],
+                "number_of_episodes": 12,
+                "number_of_seasons": 1,
+                "seasons": [
+                    {"id": 7, "season_number": 1, "name": "Season 1", "poster_path": "/poster.jpg", "episode_count": 12}
+                ]
+            }"#,
+        )
+        .expect("detail");
+
+        assert_eq!(detail.title, "Series Title");
+        assert_eq!(detail.seasons[0].season_number, 1);
+        assert_eq!(detail.runtime_minutes, Some(24));
+    }
 }
 
 pub fn run() {
@@ -122,6 +217,11 @@ pub fn run() {
             search_tmdb,
             add_entry,
             update_entry,
+            save_detail,
+            detail_for_entry,
+            refresh_entry_detail,
+            set_episode_watched,
+            episode_progress_for_entry,
             delete_entry,
             export_library,
             create_backup,

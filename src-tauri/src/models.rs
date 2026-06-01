@@ -173,6 +173,54 @@ pub struct AppStatePayload {
     pub has_api_key: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AnimeDetail {
+    pub entry_id: String,
+    pub language: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub overview: Option<String>,
+    pub status: Option<String>,
+    pub air_date: Option<String>,
+    pub vote_average: Option<f64>,
+    pub runtime_minutes: Option<i64>,
+    pub episode_count: Option<i64>,
+    pub season_count: Option<i64>,
+    pub seasons: Vec<SeasonSummary>,
+    pub episodes: Vec<EpisodeSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonSummary {
+    pub id: i64,
+    pub season_number: i64,
+    pub title: String,
+    pub poster_url: Option<String>,
+    pub episode_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeSummary {
+    pub id: i64,
+    pub episode_number: i64,
+    pub title: String,
+    pub air_date: Option<String>,
+    pub image_url: Option<String>,
+    pub overview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeProgress {
+    pub entry_id: String,
+    pub episode_number: i64,
+    pub watched: bool,
+    pub watched_at: Option<String>,
+}
+
 pub fn entry_id(tmdb_id: i64, media_type: &MediaType, season_number: Option<i64>) -> String {
     match media_type {
         MediaType::Season => format!("season-{tmdb_id}-{}", season_number.unwrap_or_default()),

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 
-use crate::models::{AnimeEntry, AppStatePayload, BasicInfo};
+use crate::models::{AnimeDetail, AnimeEntry, AppStatePayload, BasicInfo, EpisodeProgress, MediaType};
 use crate::repository::{LibraryRepository, RepositoryError};
 use crate::tmdb::{TmdbClient, TmdbError};
 
@@ -73,6 +73,83 @@ pub fn add_entry(info: BasicInfo, state: State<'_, AppRuntimeState>) -> Result<A
 pub fn update_entry(entry: AnimeEntry, state: State<'_, AppRuntimeState>) -> Result<AnimeEntry, String> {
     state.repository.update_entry(&entry).map_err(command_error)?;
     Ok(entry)
+}
+
+#[tauri::command]
+pub fn save_detail(detail: AnimeDetail, state: State<'_, AppRuntimeState>) -> Result<AnimeDetail, String> {
+    state.repository.save_detail(&detail).map_err(command_error)?;
+    Ok(detail)
+}
+
+#[tauri::command]
+pub fn detail_for_entry(entry_id: String, state: State<'_, AppRuntimeState>) -> Result<Option<AnimeDetail>, String> {
+    state.repository.detail_for_entry(&entry_id).map_err(command_error)
+}
+
+#[tauri::command]
+pub async fn refresh_entry_detail(
+    entry: AnimeEntry,
+    language: String,
+    state: State<'_, AppRuntimeState>,
+) -> Result<AnimeDetail, String> {
+    let api_key = state
+        .repository
+        .api_key()
+        .map_err(command_error)?
+        .ok_or_else(|| "TMDb API key is missing".to_string())?;
+
+    let detail = match entry.media_type {
+        MediaType::Series => state
+            .tmdb
+            .series_detail(&api_key, &entry.id, entry.tmdb_id, &language)
+            .await
+            .map_err(|error| error.to_string())?,
+        MediaType::Movie | MediaType::Season => AnimeDetail {
+            entry_id: entry.id.clone(),
+            language,
+            title: entry.name.clone(),
+            subtitle: None,
+            overview: entry.overview.clone(),
+            status: None,
+            air_date: entry.on_air_date.clone(),
+            vote_average: None,
+            runtime_minutes: None,
+            episode_count: None,
+            season_count: None,
+            seasons: Vec::new(),
+            episodes: Vec::new(),
+        },
+    };
+    state.repository.save_detail(&detail).map_err(command_error)?;
+    Ok(detail)
+}
+
+#[tauri::command]
+pub fn set_episode_watched(
+    entry_id: String,
+    episode_number: i64,
+    watched: bool,
+    state: State<'_, AppRuntimeState>,
+) -> Result<Vec<EpisodeProgress>, String> {
+    state
+        .repository
+        .set_episode_watched(&entry_id, episode_number, watched)
+        .map_err(command_error)?;
+    state
+        .repository
+        .episode_progress_for_entry(&entry_id)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn episode_progress_for_entry(
+    entry_id: String,
+    state: State<'_, AppRuntimeState>,
+) -> Result<Vec<EpisodeProgress>, String> {
+    state
+        .repository
+        .episode_progress_for_entry(&entry_id)
+        .map_err(command_error)
 }
 
 #[tauri::command]
