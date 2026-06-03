@@ -46,6 +46,7 @@ export interface LibraryFilters {
   status?: WatchStatus | "all";
   favoriteOnly?: boolean;
   query?: string;
+  hideDropped?: boolean;
 }
 
 export interface AppPreferences {
@@ -55,6 +56,18 @@ export interface AppPreferences {
   scoringEnabled: boolean;
   preferredLanguage: string;
   theme: string;
+  followSystemLanguage: boolean;
+  hideDroppedByDefault: boolean;
+  defaultNewEntryWatchStatus: WatchStatus;
+  defaultStatusFilter: WatchStatus | "all";
+  defaultFavoriteOnly: boolean;
+  openDetailWithSingleTap: boolean;
+  entryDetailCharactersExpandedByDefault: boolean;
+  entryDetailStaffExpandedByDefault: boolean;
+  episodeProgressTrackingEnabled: boolean;
+  posterProgressBarOverlayEnabled: boolean;
+  autoPrefetchImagesOnAddAndRestore: boolean;
+  useTmdbRelayServer: boolean;
 }
 
 export interface AppState {
@@ -85,8 +98,37 @@ export interface AnimeDetail {
   runtimeMinutes?: number | null;
   episodeCount?: number | null;
   seasonCount?: number | null;
+  characters: CharacterSummary[];
+  staff: StaffSummary[];
   seasons: SeasonSummary[];
   episodes: EpisodeSummary[];
+}
+
+export interface RefreshDetailResult {
+  entry: AnimeEntry;
+  detail: AnimeDetail;
+}
+
+export interface CharacterSummary {
+  id: number;
+  characterName: string;
+  actorName: string;
+  profileUrl?: string | null;
+}
+
+export interface StaffSummary {
+  id: number;
+  name: string;
+  role: string;
+  department?: string | null;
+  profileUrl?: string | null;
+  jobs: StaffJobSummary[];
+}
+
+export interface StaffJobSummary {
+  creditId: string;
+  job: string;
+  episodeCount: number;
 }
 
 export interface SeasonSummary {
@@ -99,6 +141,7 @@ export interface SeasonSummary {
 
 export interface EpisodeSummary {
   id: number;
+  seasonNumber?: number | null;
   episodeNumber: number;
   title: string;
   airDate?: string | null;
@@ -111,6 +154,17 @@ export interface EpisodeProgress {
   episodeNumber: number;
   watched: boolean;
   watchedAt?: string | null;
+}
+
+export interface PosterOption {
+  id: string;
+  url: string;
+  previewUrl: string;
+  source: string;
+  width?: number | null;
+  height?: number | null;
+  voteAverage?: number | null;
+  language?: string | null;
 }
 
 export type EpisodeWithProgress = EpisodeSummary & { watched: boolean };

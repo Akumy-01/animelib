@@ -1,19 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
-import { parseBackupState } from "./library";
-import type { AnimeDetail, AnimeEntry, AppPreferences, AppState, BasicInfo, EpisodeProgress } from "./types";
+import { defaultAppPreferences, parseBackupState } from "./library";
+import type {
+  AnimeDetail,
+  AnimeEntry,
+  AppPreferences,
+  AppState,
+  BasicInfo,
+  EpisodeProgress,
+  PosterOption,
+  RefreshDetailResult,
+} from "./types";
 
 const mockStateKey = "anishelf.windows.mockState";
 
 const fallbackState: AppState = {
   hasApiKey: false,
-  preferences: {
-    libraryViewStyle: "gallery",
-    sort: "dateSaved",
-    sortReversed: false,
-    scoringEnabled: true,
-    preferredLanguage: "zh-CN",
-    theme: "warm",
-  },
+  preferences: defaultAppPreferences,
   entries: [
     {
       id: "series-154521",
@@ -22,8 +24,8 @@ const fallbackState: AppState = {
       name: "Frieren: Beyond Journey's End",
       overview:
         "After the party of heroes defeated the Demon King, the elf mage Frieren begins a quieter journey through memory, grief, and new companionship.",
-      posterUrl: "https://image.tmdb.org/t/p/w500/dDRiOkCBCkdS2Lop7ua7Qci3b9A.jpg",
-      backdropUrl: "https://image.tmdb.org/t/p/w500/jm2z9pWlVV6kZsugOMk0nOyn8i8.jpg",
+      posterUrl: "https://image.tmdb.org/t/p/original/dDRiOkCBCkdS2Lop7ua7Qci3b9A.jpg",
+      backdropUrl: "https://image.tmdb.org/t/p/original/jm2z9pWlVV6kZsugOMk0nOyn8i8.jpg",
       detailsUrl: null,
       originalLanguageCode: "ja",
       onAirDate: "2023-09-29",
@@ -44,7 +46,7 @@ const fallbackState: AppState = {
       name: "Akira",
       overview:
         "A landmark animated film set in Neo Tokyo, following a biker gang member whose psychic power spirals beyond control.",
-      posterUrl: "https://image.tmdb.org/t/p/w500/neZ0ykEsPqxamsX6o5QNUFILQrz.jpg",
+      posterUrl: "https://image.tmdb.org/t/p/original/neZ0ykEsPqxamsX6o5QNUFILQrz.jpg",
       backdropUrl: null,
       detailsUrl: null,
       originalLanguageCode: "ja",
@@ -66,7 +68,7 @@ const fallbackState: AppState = {
       name: "Demon Slayer: Kimetsu no Yaiba",
       overview:
         "A young swordsman joins the Demon Slayer Corps while seeking a cure for his sister.",
-      posterUrl: "https://image.tmdb.org/t/p/w500/xUfRZu2mi8jH6SzQEJGP6tjBuYj.jpg",
+      posterUrl: "https://image.tmdb.org/t/p/original/xUfRZu2mi8jH6SzQEJGP6tjBuYj.jpg",
       backdropUrl: null,
       detailsUrl: null,
       originalLanguageCode: "ja",
@@ -149,13 +151,20 @@ export async function detailForEntry(entryId: string): Promise<AnimeDetail | nul
   return loadMockDetail(entryId);
 }
 
-export async function refreshEntryDetail(entry: AnimeEntry, language: string): Promise<AnimeDetail> {
+export async function posterOptionsForEntry(entry: AnimeEntry): Promise<PosterOption[]> {
   if (isTauriRuntime()) {
-    return invoke<AnimeDetail>("refresh_entry_detail", { entry, language });
+    return invoke<PosterOption[]>("poster_options_for_entry", { entry });
+  }
+  return mockPosterOptions(entry);
+}
+
+export async function refreshEntryDetail(entry: AnimeEntry, language: string): Promise<RefreshDetailResult> {
+  if (isTauriRuntime()) {
+    return invoke<RefreshDetailResult>("refresh_entry_detail", { entry, language });
   }
   const detail = makeMockDetail(entry, language);
   saveMockDetail(detail);
-  return detail;
+  return { entry, detail };
 }
 
 export async function episodeProgressForEntry(entryId: string): Promise<EpisodeProgress[]> {
@@ -204,6 +213,34 @@ export async function exportLibrary(): Promise<string> {
   return JSON.stringify(loadMockState(), null, 2);
 }
 
+export async function exportLibraryToJsonFile(): Promise<string | null> {
+  const fileName = `animelib-library-${new Date().toISOString().slice(0, 10)}.json`;
+  if (isTauriRuntime()) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const path = await save({
+      defaultPath: fileName,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (!path) {
+      return null;
+    }
+    await invoke("export_library_to_path", { path });
+    return path;
+  }
+
+  const payload = await exportLibrary();
+  const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return fileName;
+}
+
 export async function restoreBackup(backupJson: string): Promise<AppState> {
   if (isTauriRuntime()) {
     return invoke<AppState>("restore_backup", { backupJson });
@@ -216,6 +253,25 @@ export async function restoreBackup(backupJson: string): Promise<AppState> {
 
 function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
+}
+
+function mockPosterOptions(entry: AnimeEntry): PosterOption[] {
+  const urls = [
+    entry.posterUrl,
+    "https://image.tmdb.org/t/p/original/dDRiOkCBCkdS2Lop7ua7Qci3b9A.jpg",
+    "https://image.tmdb.org/t/p/original/xUfRZu2mi8jH6SzQEJGP6tjBuYj.jpg",
+    "https://image.tmdb.org/t/p/original/neZ0ykEsPqxamsX6o5QNUFILQrz.jpg",
+  ].filter((url): url is string => Boolean(url?.trim()));
+  return Array.from(new Set(urls)).map((url, index) => ({
+    id: `mock-${index}`,
+    url,
+    previewUrl: url,
+    source: "TMDb",
+    width: 500,
+    height: 750,
+    voteAverage: index === 0 ? 10 : 7 - index,
+    language: index === 0 ? "褰撳墠" : null,
+  }));
 }
 
 function loadMockState(): AppState {
@@ -262,24 +318,43 @@ function makeMockDetail(entry: AnimeEntry, language: string): AnimeDetail {
     entryId: entry.id,
     language,
     title: entry.name,
-    subtitle: entry.mediaType === "series" ? "Series detail" : null,
+    subtitle: entry.mediaType === "series" ? "鍓ч泦璇︽儏" : null,
     overview: entry.overview,
-    status: entry.watchStatus === "watched" ? "Ended" : "Returning Series",
+    status: entry.watchStatus === "watched" ? "已完结" : "连载中",
     airDate: entry.onAirDate,
     voteAverage: entry.score ? entry.score * 2 : 8.4,
     runtimeMinutes: entry.mediaType === "movie" ? 124 : 24,
     episodeCount,
     seasonCount: entry.mediaType === "series" ? 1 : null,
+    characters: [
+      {
+        id: entry.tmdbId * 10 + 1,
+        characterName: "涓昏",
+        actorName: "澹颁紭",
+        profileUrl: null,
+      },
+    ],
+    staff: [
+      {
+        id: entry.tmdbId * 10 + 2,
+        name: "鍒朵綔浜哄憳",
+        role: "瀵兼紨",
+        department: "导演组",
+        profileUrl: null,
+        jobs: [],
+      },
+    ],
     seasons:
       entry.mediaType === "series"
-        ? [{ id: entry.tmdbId * 10 + 1, seasonNumber: 1, title: "Season 1", episodeCount }]
+        ? [{ id: entry.tmdbId * 10 + 1, seasonNumber: 1, title: "第 1 季", episodeCount }]
         : [],
     episodes: Array.from({ length: episodeCount }, (_, index) => ({
       id: entry.tmdbId * 100 + index + 1,
+      seasonNumber: entry.mediaType === "series" ? 1 : null,
       episodeNumber: index + 1,
-      title: entry.mediaType === "movie" ? entry.name : `Episode ${index + 1}`,
+      title: entry.mediaType === "movie" ? entry.name : `第 ${index + 1} 集`,
       airDate: entry.onAirDate ?? null,
-      imageUrl: null,
+      imageUrl: entry.backdropUrl ?? entry.posterUrl ?? null,
       overview: index === 0 ? entry.overview : null,
     })),
   };
@@ -317,8 +392,8 @@ const mockSearchResults: BasicInfo[] = [
     mediaType: "series",
     name: "Frieren: Beyond Journey's End",
     overview: "An elf mage retraces the meaning of the journey after victory.",
-    posterUrl: "https://image.tmdb.org/t/p/w500/dDRiOkCBCkdS2Lop7ua7Qci3b9A.jpg",
-    backdropUrl: "https://image.tmdb.org/t/p/w500/jm2z9pWlVV6kZsugOMk0nOyn8i8.jpg",
+    posterUrl: "https://image.tmdb.org/t/p/original/dDRiOkCBCkdS2Lop7ua7Qci3b9A.jpg",
+    backdropUrl: "https://image.tmdb.org/t/p/original/jm2z9pWlVV6kZsugOMk0nOyn8i8.jpg",
     onAirDate: "2023-09-29",
   },
   {
@@ -326,7 +401,7 @@ const mockSearchResults: BasicInfo[] = [
     mediaType: "movie",
     name: "Akira",
     overview: "A cyberpunk anime landmark set in Neo Tokyo.",
-    posterUrl: "https://image.tmdb.org/t/p/w500/neZ0ykEsPqxamsX6o5QNUFILQrz.jpg",
+    posterUrl: "https://image.tmdb.org/t/p/original/neZ0ykEsPqxamsX6o5QNUFILQrz.jpg",
     backdropUrl: null,
     onAirDate: "1988-07-16",
   },

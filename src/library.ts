@@ -11,6 +11,27 @@ import type {
   WatchStatus,
 } from "./types";
 
+export const defaultAppPreferences: AppPreferences = {
+  libraryViewStyle: "gallery",
+  sort: "dateSaved",
+  sortReversed: false,
+  scoringEnabled: true,
+  preferredLanguage: "zh-CN",
+  theme: "warm",
+  followSystemLanguage: false,
+  hideDroppedByDefault: false,
+  defaultNewEntryWatchStatus: "planToWatch",
+  defaultStatusFilter: "all",
+  defaultFavoriteOnly: false,
+  openDetailWithSingleTap: false,
+  entryDetailCharactersExpandedByDefault: true,
+  entryDetailStaffExpandedByDefault: false,
+  episodeProgressTrackingEnabled: false,
+  posterProgressBarOverlayEnabled: true,
+  autoPrefetchImagesOnAddAndRestore: false,
+  useTmdbRelayServer: false,
+};
+
 export function sortEntries(
   entries: AnimeEntry[],
   sort: LibrarySort = "dateSaved",
@@ -35,6 +56,9 @@ export function sortEntries(
 export function filterEntries(entries: AnimeEntry[], filters: LibraryFilters): AnimeEntry[] {
   const query = filters.query?.trim().toLocaleLowerCase();
   return entries.filter((entry) => {
+    if (filters.hideDropped && (filters.status ?? "all") === "all" && entry.watchStatus === "dropped") {
+      return false;
+    }
     if (filters.status && filters.status !== "all" && entry.watchStatus !== filters.status) {
       return false;
     }
@@ -46,6 +70,14 @@ export function filterEntries(entries: AnimeEntry[], filters: LibraryFilters): A
     }
     return true;
   });
+}
+
+export function filtersFromPreferences(preferences: AppPreferences): LibraryFilters {
+  return {
+    status: preferences.defaultStatusFilter,
+    favoriteOnly: preferences.defaultFavoriteOnly,
+    hideDropped: preferences.hideDroppedByDefault,
+  };
 }
 
 export function updateQueryFilter(filters: LibraryFilters, query: string): LibraryFilters {
@@ -62,6 +94,79 @@ export function updateEntryInList(entries: AnimeEntry[], updated: AnimeEntry): A
 
 export function shouldRenderRemoteImage(url: string | null | undefined, failed: boolean): boolean {
   return !failed && Boolean(url?.trim());
+}
+
+export function applyEntryDefaults(entry: AnimeEntry, preferences: AppPreferences): AnimeEntry {
+  return {
+    ...entry,
+    watchStatus: preferences.defaultNewEntryWatchStatus,
+    score: preferences.scoringEnabled ? entry.score ?? null : null,
+  };
+}
+
+export function applyCustomPosterUrl(entry: AnimeEntry, posterUrl: string): AnimeEntry {
+  return {
+    ...entry,
+    posterUrl,
+    usingCustomPoster: true,
+  };
+}
+
+export function clearCustomPoster(entry: AnimeEntry, originalPosterUrl: string | null | undefined): AnimeEntry {
+  return {
+    ...entry,
+    posterUrl: originalPosterUrl ?? null,
+    usingCustomPoster: false,
+  };
+}
+
+export function applyTmdbPosterUrl(entry: AnimeEntry, posterUrl: string): AnimeEntry {
+  return {
+    ...entry,
+    posterUrl: tmdbOriginalImageUrl(posterUrl) ?? posterUrl,
+    usingCustomPoster: false,
+  };
+}
+
+export function tmdbOriginalImageUrl(url: string | null | undefined): string | null {
+  const trimmed = url?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.replace(
+    /^https:\/\/image\.tmdb\.org\/t\/p\/[^/]+\//,
+    "https://image.tmdb.org/t/p/original/",
+  );
+}
+
+export function applyWatchStatus(entry: AnimeEntry, watchStatus: WatchStatus): AnimeEntry {
+  return {
+    ...entry,
+    watchStatus,
+    score: watchStatus === "watched" ? entry.score ?? null : null,
+  };
+}
+
+export function compactGridCardState(
+  entry: Pick<AnimeEntry, "watchStatus" | "favorite">,
+): { showActivityDot: boolean; showHeartBadge: boolean } {
+  return {
+    showActivityDot: entry.watchStatus === "watched",
+    showHeartBadge: entry.favorite,
+  };
+}
+
+export function tmdbPosterCacheKey(
+  entry: Pick<AnimeEntry, "mediaType" | "tmdbId" | "seasonNumber">,
+): string | null {
+  if (entry.tmdbId <= 0) {
+    return null;
+  }
+  return `${entry.mediaType}:${entry.tmdbId}:${entry.seasonNumber ?? "main"}`;
+}
+
+export function toastAutoDismissDelay(message: string | null | undefined): number | null {
+  return message?.trim() ? 3200 : null;
 }
 
 export function deriveLibraryStats(entries: AnimeEntry[]): LibraryStats {
@@ -85,24 +190,24 @@ export function deriveLibraryStats(entries: AnimeEntry[]): LibraryStats {
 export function watchStatusLabel(status: WatchStatus): string {
   switch (status) {
     case "watching":
-      return "Watching";
+      return "在看";
     case "watched":
-      return "Watched";
+      return "已看完";
     case "dropped":
-      return "Dropped";
+      return "已放弃";
     case "planToWatch":
-      return "Planned";
+      return "想看";
   }
 }
 
 export function mediaTypeLabel(mediaType: AnimeEntry["mediaType"]): string {
   switch (mediaType) {
     case "movie":
-      return "Movie";
+      return "电影";
     case "series":
-      return "Series";
+      return "剧集";
     case "season":
-      return "Season";
+      return "季";
   }
 }
 
@@ -124,10 +229,20 @@ export function chunkBatchPrompts(prompts: string[], chunkSize = 8): string[][] 
 }
 
 export function parseBackupState(json: string): AppState {
-  const payload = JSON.parse(json) as {
-    entries?: AnimeEntry[];
-    preferences?: AppPreferences;
-  };
+  const payload = JSON.parse(json) as unknown;
+
+  if (isIosLibraryExportPayload(payload)) {
+    return {
+      entries: payload.entries.map(iosExportRecordToEntry),
+      preferences: defaultAppPreferences,
+      hasApiKey: false,
+    };
+  }
+
+  if (!isRecord(payload)) {
+    throw new Error("Backup is not a valid animelib payload.");
+  }
+
   if (!Array.isArray(payload.entries)) {
     throw new Error("Backup does not contain entries.");
   }
@@ -135,10 +250,137 @@ export function parseBackupState(json: string): AppState {
     throw new Error("Backup does not contain preferences.");
   }
   return {
-    entries: payload.entries,
-    preferences: payload.preferences,
+    entries: payload.entries as AnimeEntry[],
+    preferences: normalizePreferences(payload.preferences as Partial<AppPreferences>),
     hasApiKey: false,
   };
+}
+
+export function normalizePreferences(preferences: Partial<AppPreferences> | undefined): AppPreferences {
+  return {
+    ...defaultAppPreferences,
+    ...preferences,
+  };
+}
+
+export function isSupportedLibraryImportFile(fileName: string): boolean {
+  const normalized = fileName.trim().toLocaleLowerCase();
+  return normalized.endsWith(".json") || normalized.endsWith(".anishelf");
+}
+
+type IosLibraryExportPayload = {
+  app?: string;
+  entries: IosLibraryExportRecord[];
+};
+
+type IosLibraryExportRecord = {
+  title: string;
+  animeType: string;
+  seasonNumber?: number | null;
+  detailsURL?: string | null;
+  detailsUrl?: string | null;
+  releaseDate?: string | null;
+  dateSaved?: string | null;
+  watchStatus?: string | null;
+  dateStarted?: string | null;
+  dateFinished?: string | null;
+  score?: number | null;
+  favorite?: boolean | null;
+  notes?: string | null;
+  usingCustomPoster?: boolean | null;
+};
+
+function isIosLibraryExportPayload(payload: unknown): payload is IosLibraryExportPayload {
+  if (!isRecord(payload) || !Array.isArray(payload.entries)) {
+    return false;
+  }
+  if (payload.app !== "AniShelf") {
+    return false;
+  }
+  return payload.entries.every(
+    (entry) =>
+      isRecord(entry) &&
+      typeof entry.title === "string" &&
+      typeof entry.animeType === "string" &&
+      !("id" in entry),
+  );
+}
+
+function iosExportRecordToEntry(record: IosLibraryExportRecord, index: number): AnimeEntry {
+  const mediaType = mediaTypeFromIosExport(record.animeType);
+  const detailsUrl = record.detailsURL ?? record.detailsUrl ?? null;
+  const tmdbId = tmdbIdFromDetailsUrl(detailsUrl) ?? fallbackTmdbId(record.title, index);
+  const seasonNumber = typeof record.seasonNumber === "number" ? record.seasonNumber : null;
+
+  return {
+    id: entryIdFromParts(mediaType, tmdbId, seasonNumber),
+    tmdbId,
+    mediaType,
+    seasonNumber,
+    parentSeriesId: null,
+    name: record.title,
+    overview: null,
+    posterUrl: null,
+    backdropUrl: null,
+    detailsUrl,
+    originalLanguageCode: null,
+    onAirDate: record.releaseDate ?? null,
+    watchStatus: watchStatusFromIosExport(record.watchStatus),
+    dateSaved: record.dateSaved || "1970-01-01T00:00:00Z",
+    dateStarted: record.dateStarted ?? null,
+    dateFinished: record.dateFinished ?? null,
+    isDateTrackingEnabled: true,
+    score: record.score ?? null,
+    favorite: Boolean(record.favorite),
+    notes: record.notes ?? "",
+    usingCustomPoster: Boolean(record.usingCustomPoster),
+  };
+}
+
+function mediaTypeFromIosExport(value: string): AnimeEntry["mediaType"] {
+  if (value === "series" || value === "season") {
+    return value;
+  }
+  return "movie";
+}
+
+function watchStatusFromIosExport(value: string | null | undefined): WatchStatus {
+  if (value === "watching" || value === "watched" || value === "dropped") {
+    return value;
+  }
+  return "planToWatch";
+}
+
+function tmdbIdFromDetailsUrl(detailsUrl: string | null | undefined): number | null {
+  const match = detailsUrl?.match(/\/(?:movie|tv)\/(\d+)/);
+  if (!match) {
+    return null;
+  }
+  const id = Number.parseInt(match[1], 10);
+  return Number.isFinite(id) ? id : null;
+}
+
+function fallbackTmdbId(title: string, index: number): number {
+  let hash = 0;
+  for (const character of title) {
+    hash = (hash * 31 + character.charCodeAt(0)) % 9_000_000;
+  }
+  return -(hash + index + 1);
+}
+
+function entryIdFromParts(
+  mediaType: AnimeEntry["mediaType"],
+  tmdbId: number,
+  seasonNumber: number | null,
+): string {
+  if (mediaType === "season") {
+    return `season-${tmdbId}-${seasonNumber ?? 0}`;
+  }
+  return `${mediaType}-${tmdbId}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export function combineEpisodesWithProgress(

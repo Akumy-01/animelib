@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::models::{
-    AnimeDetail, AnimeEntry, AppPreferences, AppStatePayload, EpisodeProgress, MediaType,
+    entry_id, AnimeDetail, AnimeEntry, AppPreferences, AppStatePayload, EpisodeProgress, MediaType,
     WatchStatus,
 };
 
@@ -17,6 +17,36 @@ struct ExportPayload {
     format_version: u8,
     entries: Vec<AnimeEntry>,
     preferences: AppPreferences,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IosLibraryExportPayload {
+    app: Option<String>,
+    entries: Vec<IosLibraryExportRecord>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IosLibraryExportRecord {
+    title: String,
+    anime_type: String,
+    season_number: Option<i64>,
+    #[serde(rename = "detailsURL", alias = "detailsUrl")]
+    details_url: Option<String>,
+    release_date: Option<String>,
+    #[serde(default)]
+    date_saved: String,
+    watch_status: Option<String>,
+    date_started: Option<String>,
+    date_finished: Option<String>,
+    score: Option<i64>,
+    #[serde(default)]
+    favorite: bool,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    using_custom_poster: bool,
 }
 
 #[derive(Debug, Error)]
@@ -102,8 +132,9 @@ impl LibraryRepository {
         connection.execute(
             "INSERT OR REPLACE INTO anime_details (
                 entry_id, language, title, subtitle, overview, status, air_date, vote_average,
-                runtime_minutes, episode_count, season_count, seasons_json, episodes_json
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                runtime_minutes, episode_count, season_count, characters_json, staff_json,
+                seasons_json, episodes_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 detail.entry_id,
                 detail.language,
@@ -116,6 +147,8 @@ impl LibraryRepository {
                 detail.runtime_minutes,
                 detail.episode_count,
                 detail.season_count,
+                serde_json::to_string(&detail.characters)?,
+                serde_json::to_string(&detail.staff)?,
                 serde_json::to_string(&detail.seasons)?,
                 serde_json::to_string(&detail.episodes)?,
             ],
@@ -129,20 +162,30 @@ impl LibraryRepository {
             .query_row(
                 "SELECT entry_id, language, title, subtitle, overview, status, air_date,
                         vote_average, runtime_minutes, episode_count, season_count,
-                        seasons_json, episodes_json
+                        characters_json, staff_json, seasons_json, episodes_json
                  FROM anime_details
                  WHERE entry_id = ?1",
                 params![entry_id],
                 |row| {
-                    let seasons_json: String = row.get(11)?;
-                    let episodes_json: String = row.get(12)?;
-                    Ok((row_to_detail(row)?, seasons_json, episodes_json))
+                    let characters_json: String = row.get(11)?;
+                    let staff_json: String = row.get(12)?;
+                    let seasons_json: String = row.get(13)?;
+                    let episodes_json: String = row.get(14)?;
+                    Ok((
+                        row_to_detail(row)?,
+                        characters_json,
+                        staff_json,
+                        seasons_json,
+                        episodes_json,
+                    ))
                 },
             )
             .optional()?;
 
         match detail {
-            Some((mut detail, seasons_json, episodes_json)) => {
+            Some((mut detail, characters_json, staff_json, seasons_json, episodes_json)) => {
+                detail.characters = serde_json::from_str(&characters_json)?;
+                detail.staff = serde_json::from_str(&staff_json)?;
                 detail.seasons = serde_json::from_str(&seasons_json)?;
                 detail.episodes = serde_json::from_str(&episodes_json)?;
                 Ok(Some(detail))
@@ -172,7 +215,10 @@ impl LibraryRepository {
         Ok(())
     }
 
-    pub fn episode_progress_for_entry(&self, entry_id: &str) -> RepositoryResult<Vec<EpisodeProgress>> {
+    pub fn episode_progress_for_entry(
+        &self,
+        entry_id: &str,
+    ) -> RepositoryResult<Vec<EpisodeProgress>> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
             "SELECT entry_id, episode_number, watched, watched_at
@@ -214,7 +260,7 @@ impl LibraryRepository {
 
     pub fn export_json(&self) -> RepositoryResult<String> {
         let payload = ExportPayload {
-            app: "AniShelf Windows".into(),
+            app: "animelib Windows".into(),
             format_version: 1,
             entries: self.list_entries()?,
             preferences: self.load_preferences()?,
@@ -223,7 +269,7 @@ impl LibraryRepository {
     }
 
     pub fn restore_json(&self, payload_json: &str) -> RepositoryResult<()> {
-        let payload: ExportPayload = serde_json::from_str(payload_json)?;
+        let payload = parse_export_payload(payload_json)?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
         transaction.execute("DELETE FROM anime_entries", [])?;
@@ -286,6 +332,8 @@ impl LibraryRepository {
                 runtime_minutes INTEGER,
                 episode_count INTEGER,
                 season_count INTEGER,
+                characters_json TEXT NOT NULL DEFAULT '[]',
+                staff_json TEXT NOT NULL DEFAULT '[]',
                 seasons_json TEXT NOT NULL,
                 episodes_json TEXT NOT NULL,
                 FOREIGN KEY(entry_id) REFERENCES anime_entries(id) ON DELETE CASCADE
@@ -300,6 +348,18 @@ impl LibraryRepository {
                 FOREIGN KEY(entry_id) REFERENCES anime_entries(id) ON DELETE CASCADE
             );
             ",
+        )?;
+        ensure_column(
+            &connection,
+            "anime_details",
+            "characters_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        ensure_column(
+            &connection,
+            "anime_details",
+            "staff_json",
+            "TEXT NOT NULL DEFAULT '[]'",
         )?;
         Ok(())
     }
@@ -326,11 +386,109 @@ impl LibraryRepository {
     }
 
     fn connection(&self) -> RepositoryResult<std::sync::MutexGuard<'_, Connection>> {
-        self.connection.lock().map_err(|_| RepositoryError::LockPoisoned)
+        self.connection
+            .lock()
+            .map_err(|_| RepositoryError::LockPoisoned)
     }
 }
 
-fn insert_entry_with_connection(connection: &Connection, entry: &AnimeEntry) -> RepositoryResult<()> {
+fn parse_export_payload(payload_json: &str) -> RepositoryResult<ExportPayload> {
+    match serde_json::from_str::<ExportPayload>(payload_json) {
+        Ok(payload) => Ok(payload),
+        Err(primary_error) => match serde_json::from_str::<IosLibraryExportPayload>(payload_json) {
+            Ok(payload) if payload.app.as_deref() == Some("AniShelf") => Ok(ExportPayload {
+                app: "AniShelf iOS Import".into(),
+                format_version: 1,
+                entries: payload
+                    .entries
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, record)| record.into_entry(index))
+                    .collect(),
+                preferences: AppPreferences::default(),
+            }),
+            _ => Err(RepositoryError::Serde(primary_error)),
+        },
+    }
+}
+
+impl IosLibraryExportRecord {
+    fn into_entry(self, index: usize) -> AnimeEntry {
+        let media_type = MediaType::from_str(&self.anime_type);
+        let tmdb_id = tmdb_id_from_details_url(self.details_url.as_deref())
+            .unwrap_or_else(|| fallback_tmdb_id(&self.title, index));
+        let watch_status = watch_status_from_ios_export(self.watch_status.as_deref());
+        let date_saved = if self.date_saved.trim().is_empty() {
+            "1970-01-01T00:00:00Z".into()
+        } else {
+            self.date_saved
+        };
+        let id = entry_id(tmdb_id, &media_type, self.season_number);
+
+        AnimeEntry {
+            id,
+            tmdb_id,
+            media_type,
+            season_number: self.season_number,
+            parent_series_id: None,
+            name: self.title,
+            overview: None,
+            poster_url: None,
+            backdrop_url: None,
+            details_url: self.details_url,
+            original_language_code: None,
+            on_air_date: self.release_date,
+            watch_status,
+            date_saved,
+            date_started: self.date_started,
+            date_finished: self.date_finished,
+            is_date_tracking_enabled: true,
+            score: self.score,
+            favorite: self.favorite,
+            notes: self.notes,
+            using_custom_poster: self.using_custom_poster,
+        }
+    }
+}
+
+fn watch_status_from_ios_export(value: Option<&str>) -> WatchStatus {
+    match value {
+        Some("watching") => WatchStatus::Watching,
+        Some("watched") => WatchStatus::Watched,
+        Some("dropped") => WatchStatus::Dropped,
+        _ => WatchStatus::PlanToWatch,
+    }
+}
+
+fn tmdb_id_from_details_url(value: Option<&str>) -> Option<i64> {
+    let value = value?;
+    for marker in ["/movie/", "/tv/"] {
+        let Some(marker_index) = value.find(marker) else {
+            continue;
+        };
+        let suffix = &value[marker_index + marker.len()..];
+        let digits: String = suffix
+            .chars()
+            .take_while(|character| character.is_ascii_digit())
+            .collect();
+        if let Ok(id) = digits.parse::<i64>() {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn fallback_tmdb_id(title: &str, index: usize) -> i64 {
+    let hash = title.bytes().fold(0_i64, |hash, byte| {
+        (hash.wrapping_mul(31).wrapping_add(byte as i64)).rem_euclid(9_000_000)
+    });
+    -(hash + index as i64 + 1)
+}
+
+fn insert_entry_with_connection(
+    connection: &Connection,
+    entry: &AnimeEntry,
+) -> RepositoryResult<()> {
     let is_date_tracking_enabled = entry.is_date_tracking_enabled as i64;
     let favorite = entry.favorite as i64;
     let using_custom_poster = entry.using_custom_poster as i64;
@@ -409,7 +567,28 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<AnimeDetail> {
         runtime_minutes: row.get(8)?,
         episode_count: row.get(9)?,
         season_count: row.get(10)?,
+        characters: Vec::new(),
+        staff: Vec::new(),
         seasons: Vec::new(),
         episodes: Vec::new(),
     })
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> RepositoryResult<()> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|name| name == column) {
+        connection.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
 }
