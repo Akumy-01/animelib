@@ -28,3 +28,11 @@ npm run tauri -- dev
 ```powershell
 npm run tauri -- build
 ```
+## 说明
+本项目是 (https://github.com/samuelhe52/AniShelf) 的 Windows 移植/复刻版本。原项目由 [samuelhe52](https://github.com/samuelhe52) 开发并开源。
+
+感谢原作者打造了这款优秀的动漫追番数字书架！本 Windows 版本沿用了原版的核心设计理念与主要功能，并专门针对 Windows 平台进行了操作和界面的适配。
+
+## 鸣谢 (Acknowledgements)
+* **原项目地址**: [samuelhe52/AniShelf](https://github.com/samuelhe52/AniShelf)
+* **原作者**: [Samuel He](https://github.com/samuelhe52)
